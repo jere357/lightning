@@ -16,11 +16,11 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from lightning.pytorch.core.module import LightningModule
 from torch.utils.data import DataLoader
 
-from lightning.pytorch.core.module import LightningModule
 from tests_pytorch import _PATH_DATASETS
-from tests_pytorch.helpers.datasets import AverageDataset, MNIST, TrialMNIST
+from tests_pytorch.helpers.datasets import MNIST, AverageDataset, TrialMNIST
 
 
 class Generator(nn.Module):
@@ -171,7 +171,7 @@ class ParityModuleRNN(LightningModule):
         self._loss = []  # needed for checking if the loss is the same as vanilla torch
 
     def forward(self, x):
-        seq, last = self.rnn(x)
+        seq, _ = self.rnn(x)
         return self.linear_out(seq)
 
     def training_step(self, batch, batch_nb):

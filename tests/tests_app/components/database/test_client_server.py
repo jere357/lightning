@@ -9,7 +9,6 @@ from typing import List, Optional
 from uuid import uuid4
 
 import pytest
-
 from lightning.app import LightningApp, LightningFlow, LightningWork
 from lightning.app.components.database import Database, DatabaseClient
 from lightning.app.components.database.utilities import _GeneralModel, _pydantic_column_type
@@ -54,7 +53,7 @@ def test_client_server():
 
     secrets = [Secret(name="example", value="secret")]
 
-    general = _GeneralModel.from_obj(TestConfig(name="name", secrets=secrets), token="a")  # noqa: S106
+    general = _GeneralModel.from_obj(TestConfig(name="name", secrets=secrets), token="a")
     assert general.cls_name == "TestConfig"
     assert general.data == '{"id": null, "name": "name", "secrets": [{"name": "example", "value": "secret"}]}'
 

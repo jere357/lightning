@@ -2,7 +2,7 @@ import argparse
 import math
 import os
 from distutils.util import strtobool
-from typing import Optional, TYPE_CHECKING, Union
+from typing import TYPE_CHECKING, Optional, Union
 
 import gymnasium as gym
 import torch
@@ -173,7 +173,7 @@ def test(
         action = agent.get_greedy_action(next_obs)
 
         # Single environment step
-        next_obs, reward, done, truncated, info = env.step(action.cpu().numpy())
+        next_obs, reward, done, truncated, _ = env.step(action.cpu().numpy())
         done = done or truncated
         cumulative_rew += reward
         next_obs = torch.tensor(next_obs, device=device)

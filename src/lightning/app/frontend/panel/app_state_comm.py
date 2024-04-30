@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """The watch_app_state function enables us to trigger a callback function when ever the app state changes."""
+
 # Todo: Refactor with Streamlit
 # Note: It would be nice one day to just watch changes within the Flow scope instead of whole app
 from __future__ import annotations
@@ -94,6 +95,7 @@ def _watch_app_state(callback: Callable):
             def handle_state_change():
                 print("The App State changed.")
                 watch_app_state(handle_state_change)
+
     """
     _CALLBACKS.append(callback)
     _start_websocket()

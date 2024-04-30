@@ -12,23 +12,22 @@ from unittest.mock import MagicMock, Mock
 
 import pytest
 from deepdiff import DeepDiff, Delta
-
 from lightning.app import LightningApp, LightningFlow, LightningWork
 from lightning.app.runners import MultiProcessRuntime
-from lightning.app.storage import Drive, Path
-from lightning.app.storage.path import _artifacts_path
+from lightning.app.storage import Drive
+from lightning.app.storage.path import Path, _artifacts_path
 from lightning.app.storage.requests import _GetRequest
-from lightning.app.testing.helpers import _MockQueue, EmptyFlow
+from lightning.app.testing.helpers import EmptyFlow, _MockQueue
 from lightning.app.utilities.component import _convert_paths_after_init
 from lightning.app.utilities.enum import AppStage, CacheCallsKeys, WorkFailureReasons, WorkStageStatus
 from lightning.app.utilities.exceptions import CacheMissException, ExitAppException
 from lightning.app.utilities.proxies import (
     ComponentDelta,
     LightningWorkSetAttrProxy,
-    persist_artifacts,
     ProxyWorkRun,
     WorkRunner,
     WorkStateObserver,
+    persist_artifacts,
 )
 
 logger = logging.getLogger(__name__)
@@ -129,14 +128,12 @@ def test_work_runner(parallel, cache_calls, *_):
         "run_started_counter": 1,
         "statuses": [],
     }
-    caller_queue.put(
-        {
-            "args": (),
-            "kwargs": {},
-            "call_hash": call_hash,
-            "state": work.state,
-        }
-    )
+    caller_queue.put({
+        "args": (),
+        "kwargs": {},
+        "call_hash": call_hash,
+        "state": work.state,
+    })
     work_runner = WorkRunner(
         work,
         work.name,
@@ -255,15 +252,13 @@ class WorkRunnerPatch(WorkRunner):
                 called = self.caller_queue.get()
                 self.work.set_state(called["state"])
                 state = deepcopy(self.work.state)
-                self.work._calls[call_hash]["statuses"].append(
-                    {
-                        "name": self.work.name,
-                        "stage": WorkStageStatus.FAILED,
-                        "reason": WorkFailureReasons.TIMEOUT,
-                        "timestamp": time.time(),
-                        "message": None,
-                    }
-                )
+                self.work._calls[call_hash]["statuses"].append({
+                    "name": self.work.name,
+                    "stage": WorkStageStatus.FAILED,
+                    "reason": WorkFailureReasons.TIMEOUT,
+                    "timestamp": time.time(),
+                    "message": None,
+                })
                 self.delta_queue.put(
                     ComponentDelta(id=self.work_name, delta=Delta(DeepDiff(state, self.work.state, verbose_level=2)))
                 )
@@ -288,8 +283,7 @@ def test_proxy_timeout():
 
 @mock.patch("lightning.app.utilities.proxies._Copier")
 def test_path_argument_to_transfer(*_):
-    """Test that any Lightning Path objects passed to the run method get transferred automatically (if they
-    exist)."""
+    """Test that any Lightning Path objects passed to the run method get transferred automatically (if they exist)."""
 
     class TransferPathWork(LightningWork):
         def run(self, *args, **kwargs):
@@ -372,8 +366,7 @@ def test_path_argument_to_transfer(*_):
 )
 @mock.patch("lightning.app.utilities.proxies._Copier")
 def test_path_attributes_to_transfer(_, origin, exists_remote, expected_get):
-    """Test that any Lightning Path objects passed to the run method get transferred automatically (if they
-    exist)."""
+    """Test that any Lightning Path objects passed to the run method get transferred automatically (if they exist)."""
     path_mock = Mock()
     path_mock.origin_name = origin
     path_mock.exists_remote = Mock(return_value=exists_remote)
@@ -518,8 +511,8 @@ def test_persist_artifacts(tmp_path):
 
 
 def test_work_state_observer():
-    """Tests that the WorkStateObserver sends deltas to the queue when state residuals remain that haven't been
-    handled by the setattr."""
+    """Tests that the WorkStateObserver sends deltas to the queue when state residuals remain that haven't been handled
+    by the setattr."""
 
     class WorkWithoutSetattr(LightningWork):
         def __init__(self):
@@ -685,14 +678,12 @@ def test_work_runner_sets_public_and_private_ip(patch_constants, environment, ex
         "run_started_counter": 1,
         "statuses": [],
     }
-    work_runner.caller_queue.put(
-        {
-            "args": (),
-            "kwargs": {},
-            "call_hash": call_hash,
-            "state": work.state,
-        }
-    )
+    work_runner.caller_queue.put({
+        "args": (),
+        "kwargs": {},
+        "call_hash": call_hash,
+        "state": work.state,
+    })
 
     with mock.patch.dict(os.environ, environment, clear=True):
         work_runner.setup()

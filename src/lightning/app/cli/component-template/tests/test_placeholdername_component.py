@@ -2,7 +2,9 @@ r"""To test a lightning component:
 
 1. Init the component.
 2. call .run()
+
 """
+
 from placeholdername.component import TemplateComponent
 
 

@@ -15,9 +15,9 @@
 import warnings
 from typing import Any, Type
 
-from lightning.app import structures
 from lightning.app.core.flow import LightningFlow
 from lightning.app.core.work import LightningWork
+from lightning.app.structures import List as _List
 from lightning.app.utilities.cloud import is_running_in_cloud
 from lightning.app.utilities.packaging.cloud_compute import CloudCompute
 
@@ -37,10 +37,10 @@ class MultiNode(LightningFlow):
 
             import torch
 
-            import lightning as L
+            from lightning.app import LightningWork, CloudCompute
             from lightning.components import MultiNode
 
-            class AnyDistributedComponent(L.LightningWork):
+            class AnyDistributedComponent(LightningWork):
                 def run(
                     self,
                     main_address: str,
@@ -50,8 +50,8 @@ class MultiNode(LightningFlow):
                     print(f"ADD YOUR DISTRIBUTED CODE: {main_address} {main_port} {node_rank}")
 
 
-            compute = L.CloudCompute("gpu")
-            app = L.LightningApp(
+            compute = CloudCompute("gpu")
+            app = LightningApp(
                 MultiNode(
                     AnyDistributedComponent,
                     num_nodes=8,
@@ -67,6 +67,7 @@ class MultiNode(LightningFlow):
                 running locally.
             work_args: Arguments to be provided to the work on instantiation.
             work_kwargs: Keywords arguments to be provided to the work on instantiation.
+
         """
         super().__init__()
         if num_nodes > 1 and not is_running_in_cloud():
@@ -76,17 +77,15 @@ class MultiNode(LightningFlow):
                 " To run on multiple nodes in the cloud, launch your app with `--cloud`."
             )
             num_nodes = 1
-        self.ws = structures.List(
-            *[
-                work_cls(
-                    *work_args,
-                    cloud_compute=cloud_compute.clone(),
-                    **work_kwargs,
-                    parallel=True,
-                )
-                for _ in range(num_nodes)
-            ]
-        )
+        self.ws = _List(*[
+            work_cls(
+                *work_args,
+                cloud_compute=cloud_compute.clone(),
+                **work_kwargs,
+                parallel=True,
+            )
+            for _ in range(num_nodes)
+        ])
 
     def run(self) -> None:
         # 1. Wait for all works to be started !

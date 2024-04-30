@@ -4,13 +4,14 @@ from pathlib import PosixPath
 from unittest.mock import MagicMock
 
 import pytest
+from lightning.app.cli.commands import cp
+from lightning.app.cli.commands.cd import _CD_FILE, cd
 from lightning_cloud.openapi import (
     Externalv1Cluster,
     Externalv1LightningappInstance,
     V1CloudSpace,
     V1ClusterDriver,
     V1ClusterSpec,
-    V1GetClusterResponse,
     V1KubernetesClusterDriver,
     V1LightningappInstanceArtifact,
     V1LightningappInstanceSpec,
@@ -24,9 +25,6 @@ from lightning_cloud.openapi import (
     V1ProjectClusterBinding,
     V1UploadProjectArtifactResponse,
 )
-
-from lightning.app.cli.commands import cp
-from lightning.app.cli.commands.cd import _CD_FILE, cd
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="not supported on windows yet")
@@ -48,7 +46,7 @@ def test_cp_local_to_remote(tmpdir, monkeypatch):
     )
 
     result = MagicMock()
-    result.get.return_value = V1UploadProjectArtifactResponse(upload_url="http://foo.bar")
+    result.get.return_value = V1UploadProjectArtifactResponse(urls=["http://foo.bar"])
     client.lightningapp_instance_service_upload_project_artifact.return_value = result
 
     monkeypatch.setattr(cp, "LightningClient", MagicMock(return_value=client))
@@ -214,7 +212,7 @@ def test_cp_zip_remote_to_local_app_artifact(monkeypatch):
     monkeypatch.setattr(cp, "_AuthTokenGetter", MagicMock(return_value=token_getter))
 
     client = MagicMock()
-    client.cluster_service_get_cluster.return_value = V1GetClusterResponse(
+    client.cluster_service_get_cluster.return_value = Externalv1Cluster(
         spec=V1ClusterSpec(driver=V1ClusterDriver(kubernetes=V1KubernetesClusterDriver(root_domain_name="my-domain")))
     )
     client.projects_service_list_memberships.return_value = V1ListMembershipsResponse(

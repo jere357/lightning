@@ -14,27 +14,34 @@
 import logging
 import os
 import re
+import subprocess
+import sys
 from argparse import Namespace
 from typing import Any, List, Optional
 
+import torch
 from lightning_utilities.core.imports import RequirementCache
 from typing_extensions import get_args
 
 from lightning.fabric.accelerators import CPUAccelerator, CUDAAccelerator, MPSAccelerator
 from lightning.fabric.plugins.precision.precision import _PRECISION_INPUT_STR, _PRECISION_INPUT_STR_ALIAS
 from lightning.fabric.strategies import STRATEGY_REGISTRY
+from lightning.fabric.utilities.consolidate_checkpoint import _process_cli_args
 from lightning.fabric.utilities.device_parser import _parse_gpu_ids
+from lightning.fabric.utilities.distributed import _suggested_max_num_threads
+from lightning.fabric.utilities.load import _load_distributed_checkpoint
 
 _log = logging.getLogger(__name__)
 
 _CLICK_AVAILABLE = RequirementCache("click")
+_LIGHTNING_SDK_AVAILABLE = RequirementCache("lightning_sdk")
 
 _SUPPORTED_ACCELERATORS = ("cpu", "gpu", "cuda", "mps", "tpu")
 
 
 def _get_supported_strategies() -> List[str]:
-    """Returns strategy choices from the registry, with the ones removed that are incompatible to be launched from
-    the CLI or ones that require further configuration by the user."""
+    """Returns strategy choices from the registry, with the ones removed that are incompatible to be launched from the
+    CLI or ones that require further configuration by the user."""
     available_strategies = STRATEGY_REGISTRY.available_strategies()
     excluded = r".*(spawn|fork|notebook|xla|tpu|offload).*"
     return [strategy for strategy in available_strategies if not re.match(excluded, strategy)]
@@ -43,8 +50,31 @@ def _get_supported_strategies() -> List[str]:
 if _CLICK_AVAILABLE:
     import click
 
-    @click.command(
-        "model",
+    def _legacy_main() -> None:
+        """Legacy CLI handler for fabric.
+
+        Raises deprecation warning and runs through fabric cli if necessary, else runs the entrypoint directly
+
+        """
+        print(
+            "`lightning run model` is deprecated and will be removed in future versions."
+            " Please call `fabric run` instead."
+        )
+        args = sys.argv[1:]
+        if args and args[0] == "run" and args[1] == "model":
+            _main()
+            return
+
+        if _LIGHTNING_SDK_AVAILABLE:
+            subprocess.run([sys.executable, "-m", "lightning_sdk.cli.entrypoint"] + args)
+            return
+
+    @click.group()
+    def _main() -> None:
+        pass
+
+    @_main.command(
+        "run",
         context_settings={
             "ignore_unknown_options": True,
         },
@@ -115,22 +145,55 @@ if _CLICK_AVAILABLE:
         ),
     )
     @click.argument("script_args", nargs=-1, type=click.UNPROCESSED)
-    def _run_model(**kwargs: Any) -> None:
+    def _run(**kwargs: Any) -> None:
         """Run a Lightning Fabric script.
 
         SCRIPT is the path to the Python script with the code to run. The script must contain a Fabric object.
 
         SCRIPT_ARGS are the remaining arguments that you can pass to the script itself and are expected to be parsed
         there.
+
         """
         script_args = list(kwargs.pop("script_args", []))
         main(args=Namespace(**kwargs), script_args=script_args)
+
+    @_main.command(
+        "consolidate",
+        context_settings={
+            "ignore_unknown_options": True,
+        },
+    )
+    @click.argument(
+        "checkpoint_folder",
+        type=click.Path(exists=True),
+    )
+    @click.option(
+        "--output_file",
+        type=click.Path(exists=True),
+        default=None,
+        help=(
+            "Path to the file where the converted checkpoint should be saved. The file should not already exist."
+            " If no path is provided, the file will be saved next to the input checkpoint folder with the same name"
+            " and a '.consolidated' suffix."
+        ),
+    )
+    def _consolidate(checkpoint_folder: str, output_file: Optional[str]) -> None:
+        """Convert a distributed/sharded checkpoint into a single file that can be loaded with `torch.load()`.
+
+        Only supports FSDP sharded checkpoints at the moment.
+
+        """
+        args = Namespace(checkpoint_folder=checkpoint_folder, output_file=output_file)
+        config = _process_cli_args(args)
+        checkpoint = _load_distributed_checkpoint(config.checkpoint_folder)
+        torch.save(checkpoint, config.output_file)
 
 
 def _set_env_variables(args: Namespace) -> None:
     """Set the environment variables for the new processes.
 
     The Fabric connector will parse the arguments set here.
+
     """
     os.environ["LT_CLI_USED"] = "1"
     if args.accelerator is not None:
@@ -175,7 +238,7 @@ def _torchrun_launch(args: Namespace, script_args: List[str]) -> None:
     torchrun_args.extend(script_args)
 
     # set a good default number of threads for OMP to avoid warnings being emitted to the user
-    os.environ.setdefault("OMP_NUM_THREADS", str(max(1, (os.cpu_count() or 1) // num_processes)))
+    os.environ.setdefault("OMP_NUM_THREADS", str(_suggested_max_num_threads()))
     torchrun.main(torchrun_args)
 
 
@@ -192,4 +255,4 @@ if __name__ == "__main__":
         )
         raise SystemExit(1)
 
-    _run_model()
+    _run()

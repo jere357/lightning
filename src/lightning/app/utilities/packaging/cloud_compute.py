@@ -16,7 +16,7 @@ from dataclasses import asdict, dataclass
 from typing import Dict, List, Optional, Tuple, Union
 from uuid import uuid4
 
-from lightning.app.core.constants import enable_interruptible_works, ENABLE_MULTIPLE_WORKS_IN_NON_DEFAULT_CONTAINER
+from lightning.app.core.constants import ENABLE_MULTIPLE_WORKS_IN_NON_DEFAULT_CONTAINER, enable_interruptible_works
 from lightning.app.storage.mount import Mount
 
 __CLOUD_COMPUTE_IDENTIFIER__ = "__cloud_compute__"
@@ -88,6 +88,7 @@ class CloudCompute:
         interruptible: Whether to run on a interruptible machine e.g the machine can be stopped
             at any time by the providers. This is also known as spot or preemptible machines.
             Compared to on-demand machines, they tend to be cheaper.
+
     """
 
     name: str = "default"
@@ -155,7 +156,7 @@ class CloudCompute:
                 f"mounts argument must be one of [None, Mount, List[Mount]], "
                 f"received {mounts} of type {type(mounts)}"
             )
-        _verify_mount_root_dirs_are_unique(d.get("mounts", None))
+        _verify_mount_root_dirs_are_unique(d.get("mounts"))
         return cls(**d)
 
     @property
@@ -182,6 +183,6 @@ def _verify_mount_root_dirs_are_unique(mounts: Union[None, Mount, List[Mount], T
 
 
 def _maybe_create_cloud_compute(state: Dict) -> Union[CloudCompute, Dict]:
-    if state and state.get("type", None) == __CLOUD_COMPUTE_IDENTIFIER__:
+    if state and state.get("type") == __CLOUD_COMPUTE_IDENTIFIER__:
         return CloudCompute.from_dict(state)
     return state

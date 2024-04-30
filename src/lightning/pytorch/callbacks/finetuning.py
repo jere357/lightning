@@ -11,7 +11,13 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-r"""Finetuning Callback ^^^^^^^^^^^^^^^^^^^^ Freeze and unfreeze models for finetuning purposes."""
+r"""
+Finetuning Callback
+^^^^^^^^^^^^^^^^^^^^
+
+Freeze and unfreeze models for finetuning purposes.
+"""
+
 import logging
 from typing import Any, Callable, Dict, Generator, Iterable, List, Optional, Union
 
@@ -19,6 +25,7 @@ import torch
 from torch.nn import Module, ModuleDict
 from torch.nn.modules.batchnorm import _BatchNorm
 from torch.optim.optimizer import Optimizer
+from typing_extensions import override
 
 import lightning.pytorch as pl
 from lightning.pytorch.callbacks.callback import Callback
@@ -74,17 +81,20 @@ class BaseFinetuning(Callback):
         ...                 optimizer=optimizer,
         ...                 train_bn=True,
         ...             )
+
     """
 
     def __init__(self) -> None:
         self._internal_optimizer_metadata: Dict[int, List[Dict[str, Any]]] = {}
         self._restarting = False
 
+    @override
     def state_dict(self) -> Dict[str, Any]:
         return {
             "internal_optimizer_metadata": self._internal_optimizer_metadata,
         }
 
+    @override
     def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
         self._restarting = True
         if "internal_optimizer_metadata" in state_dict:  # noqa: SIM401
@@ -93,6 +103,7 @@ class BaseFinetuning(Callback):
             # compatibility to load from old checkpoints before PR #11887
             self._internal_optimizer_metadata = state_dict  # type: ignore[assignment]
 
+    @override
     def on_fit_start(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:
         # restore the param_groups created during the previous training.
         if self._restarting:
@@ -106,21 +117,22 @@ class BaseFinetuning(Callback):
 
     @staticmethod
     def flatten_modules(modules: Union[Module, Iterable[Union[Module, Iterable]]]) -> List[Module]:
-        """This function is used to flatten a module or an iterable of modules into a list of its leaf modules
-        (modules with no children) and parent modules that have parameters directly themselves.
+        """This function is used to flatten a module or an iterable of modules into a list of its leaf modules (modules
+        with no children) and parent modules that have parameters directly themselves.
 
         Args:
             modules: A given module or an iterable of modules
 
         Returns:
             List of modules
+
         """
         if isinstance(modules, ModuleDict):
             modules = modules.values()
 
         if isinstance(modules, Iterable):
             _flatten_modules = []
-            for m in modules:
+            for m in modules:  # type: ignore[union-attr]
                 _flatten_modules.extend(BaseFinetuning.flatten_modules(m))
 
             _modules = iter(_flatten_modules)
@@ -142,6 +154,7 @@ class BaseFinetuning(Callback):
             requires_grad: Whether to create a generator for trainable or non-trainable parameters.
         Returns:
             Generator
+
         """
         modules = BaseFinetuning.flatten_modules(modules)
         for mod in modules:
@@ -158,6 +171,7 @@ class BaseFinetuning(Callback):
 
         Args:
             modules: A given module or an iterable of modules
+
         """
         modules = BaseFinetuning.flatten_modules(modules)
         for module in modules:
@@ -173,6 +187,7 @@ class BaseFinetuning(Callback):
 
         Args:
             module: A given module
+
         """
         if isinstance(module, _BatchNorm):
             module.track_running_stats = False
@@ -190,6 +205,7 @@ class BaseFinetuning(Callback):
 
         Returns:
             None
+
         """
         modules = BaseFinetuning.flatten_modules(modules)
         for mod in modules:
@@ -208,6 +224,7 @@ class BaseFinetuning(Callback):
 
         Returns:
             List of parameters not contained in this optimizer param groups
+
         """
         out_params = []
         removed_params = []
@@ -245,6 +262,7 @@ class BaseFinetuning(Callback):
             initial_denom_lr: If no lr is provided, the learning from the first param group will be used
                 and divided by `initial_denom_lr`.
             train_bn: Whether to train the BatchNormalization layers.
+
         """
         BaseFinetuning.make_trainable(modules)
         params_lr = optimizer.param_groups[0]["lr"] if lr is None else float(lr)
@@ -254,8 +272,17 @@ class BaseFinetuning(Callback):
         if params:
             optimizer.add_param_group({"params": params, "lr": params_lr / denom_lr})
 
+    @override
     def setup(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", stage: str) -> None:
         self.freeze_before_training(pl_module)
+
+        from lightning.pytorch.strategies import DeepSpeedStrategy
+
+        if isinstance(trainer.strategy, DeepSpeedStrategy):
+            raise NotImplementedError(
+                "The Finetuning callback does not support running with the DeepSpeed strategy."
+                " Choose a different strategy or disable the callback."
+            )
 
     @staticmethod
     def _apply_mapping_to_param_groups(param_groups: List[Dict[str, Any]], mapping: dict) -> List[Dict[str, Any]]:
@@ -285,6 +312,7 @@ class BaseFinetuning(Callback):
                 self._apply_mapping_to_param_groups(current_param_groups[num_param_groups:], mapping)
             )
 
+    @override
     def on_train_epoch_start(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:
         """Called when the epoch begins."""
         for opt_idx, optimizer in enumerate(trainer.optimizers):
@@ -330,6 +358,7 @@ class BackboneFinetuning(BaseFinetuning):
         >>> multiplicative = lambda epoch: 1.5
         >>> backbone_finetuning = BackboneFinetuning(200, multiplicative)
         >>> trainer = Trainer(callbacks=[backbone_finetuning])
+
     """
 
     def __init__(
@@ -357,16 +386,19 @@ class BackboneFinetuning(BaseFinetuning):
         self.rounding: int = rounding
         self.previous_backbone_lr: Optional[float] = None
 
+    @override
     def state_dict(self) -> Dict[str, Any]:
         return {
             "internal_optimizer_metadata": self._internal_optimizer_metadata,
             "previous_backbone_lr": self.previous_backbone_lr,
         }
 
+    @override
     def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
         self.previous_backbone_lr = state_dict["previous_backbone_lr"]
         super().load_state_dict(state_dict)
 
+    @override
     def on_fit_start(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:
         """
         Raises:
@@ -377,9 +409,11 @@ class BackboneFinetuning(BaseFinetuning):
             return super().on_fit_start(trainer, pl_module)
         raise MisconfigurationException("The LightningModule should have a nn.Module `backbone` attribute")
 
+    @override
     def freeze_before_training(self, pl_module: "pl.LightningModule") -> None:
         self.freeze(pl_module.backbone)
 
+    @override
     def finetune_function(self, pl_module: "pl.LightningModule", epoch: int, optimizer: Optimizer) -> None:
         """Called when the epoch begins."""
         if epoch == self.unfreeze_backbone_at_epoch:

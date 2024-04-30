@@ -26,7 +26,7 @@ from os.path import dirname, isfile
 from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence, Tuple, Union
 
-from pkg_resources import parse_requirements, Requirement, yield_lines
+from pkg_resources import Requirement, parse_requirements, yield_lines
 
 REQUIREMENT_FILES = {
     "pytorch": (
@@ -36,19 +36,15 @@ REQUIREMENT_FILES = {
         "requirements/pytorch/examples.txt",
     ),
     "app": (
-        "requirements/app/base.txt",
-        "requirements/app/ui.txt",
+        "requirements/app/app.txt",
         "requirements/app/cloud.txt",
+        "requirements/app/ui.txt",
     ),
     "fabric": (
         "requirements/fabric/base.txt",
         "requirements/fabric/strategies.txt",
     ),
-    "data": (
-        "requirements/data/data.txt",
-        "requirements/data/cloud.txt",
-        "requirements/data/examples.txt",
-    ),
+    "data": ("requirements/data/data.txt",),
 }
 REQUIREMENT_FILES_ALL = list(chain(*REQUIREMENT_FILES.values()))
 
@@ -86,6 +82,7 @@ class _RequirementWithComment(Requirement):
         'arrow>=1.2.0'
         >>> _RequirementWithComment("arrow").adjust("major")
         'arrow'
+
         """
         out = str(self)
         if self.strict:
@@ -115,6 +112,7 @@ def _parse_requirements(strs: Union[str, Iterable[str]]) -> Iterator[_Requiremen
     >>> txt = '\\n'.join(txt)
     >>> [r.adjust('none') for r in _parse_requirements(txt)]
     ['this', 'example', 'foo  # strict', 'thing']
+
     """
     lines = yield_lines(strs)
     pip_argument = None
@@ -149,6 +147,7 @@ def load_requirements(path_dir: str, file_name: str = "base.txt", unfreeze: str 
     >>> path_req = os.path.join(_PROJECT_ROOT, "requirements")
     >>> load_requirements(path_req, "docs.txt", unfreeze="major")  # doctest: +ELLIPSIS +NORMALIZE_WHITESPACE
     ['sphinx<...]
+
     """
     assert unfreeze in {"none", "major", "all"}
     path = Path(path_dir) / file_name
@@ -165,6 +164,7 @@ def load_readme_description(path_dir: str, homepage: str, version: str) -> str:
 
     >>> load_readme_description(_PROJECT_ROOT, "", "")  # doctest: +ELLIPSIS +NORMALIZE_WHITESPACE
     '...PyTorch Lightning is just organized PyTorch...'
+
     """
     path_readme = os.path.join(path_dir, "README.md")
     with open(path_readme, encoding="utf-8") as fo:
@@ -196,13 +196,12 @@ def load_readme_description(path_dir: str, homepage: str, version: str) -> str:
     skip_begin = r"<!-- following section will be skipped from PyPI description -->"
     skip_end = r"<!-- end skipping PyPI description -->"
     # todo: wrap content as commented description
-    text = re.sub(rf"{skip_begin}.+?{skip_end}", "<!--  -->", text, flags=re.IGNORECASE + re.DOTALL)
+    return re.sub(rf"{skip_begin}.+?{skip_end}", "<!--  -->", text, flags=re.IGNORECASE + re.DOTALL)
 
     # # https://github.com/Borda/pytorch-lightning/releases/download/1.1.0a6/codecov_badge.png
     # github_release_url = os.path.join(homepage, "releases", "download", version)
     # # download badge and replace url with local file
     # text = _parse_for_badge(text, github_release_url)
-    return text
 
 
 def distribute_version(src_folder: str, ver_file: str = "version.info") -> None:
@@ -217,7 +216,7 @@ def distribute_version(src_folder: str, ver_file: str = "version.info") -> None:
         shutil.copy2(ver_template, fpath)
 
 
-def _download_frontend(pkg_path: str):
+def _download_frontend(pkg_path: str, version: str = "v0.0.0"):
     """Downloads an archive file for a specific release of the Lightning frontend and extracts it to the correct
     directory."""
 
@@ -227,13 +226,13 @@ def _download_frontend(pkg_path: str):
 
         shutil.rmtree(frontend_dir, ignore_errors=True)
         # TODO: remove this once lightning-ui package is ready as a dependency
-        frontend_release_url = "https://storage.googleapis.com/grid-packages/lightning-ui/v0.0.0/build.tar.gz"
+        frontend_release_url = f"https://lightning-packages.s3.amazonaws.com/ui/{version}.tar.gz"
         response = urllib.request.urlopen(frontend_release_url)
 
         file = tarfile.open(fileobj=response, mode="r|gz")
-        file.extractall(path=download_dir)
+        file.extractall(path=download_dir)  # noqa: S202
 
-        shutil.move(os.path.join(download_dir, "build"), frontend_dir)
+        shutil.move(download_dir, frontend_dir)
         print("The Lightning UI has successfully been downloaded!")
 
     # If installing from source without internet connection, we don't want to break the installation
@@ -245,6 +244,7 @@ def _load_aggregate_requirements(req_dir: str = "requirements", freeze_requireme
     """Load all base requirements from all particular packages and prune duplicates.
 
     >>> _load_aggregate_requirements(os.path.join(_PROJECT_ROOT, "requirements"))
+
     """
     requires = [
         load_requirements(d, unfreeze="none" if freeze_requirements else "major")
@@ -301,6 +301,7 @@ def _replace_imports(lines: List[str], mapping: List[Tuple[str, str]], lightning
      'http://pytorch_lightning.ai', \
      'from lightning_fabric import __version__', \
      '@lightning.ai']
+
     """
     out = lines[:]
     for source_import, target_import in mapping:
@@ -358,17 +359,19 @@ def copy_replace_imports(
 
 
 def create_mirror_package(source_dir: str, package_mapping: Dict[str, str]) -> None:
+    """Create a mirror package with adjusted imports."""
     # replace imports and copy the code
     mapping = package_mapping.copy()
     mapping.pop("lightning", None)  # pop this key to avoid replacing `lightning` to `lightning.lightning`
 
     mapping = {f"lightning.{sp}": sl for sp, sl in mapping.items()}
     for pkg_from, pkg_to in mapping.items():
+        source_imports, target_imports = zip(*mapping.items())
         copy_replace_imports(
             source_dir=os.path.join(source_dir, pkg_from.replace(".", os.sep)),
             # pytorch_lightning uses lightning_fabric, so we need to replace all imports for all directories
-            source_imports=mapping.keys(),
-            target_imports=mapping.values(),
+            source_imports=source_imports,
+            target_imports=target_imports,
             target_dir=os.path.join(source_dir, pkg_to.replace(".", os.sep)),
             lightning_by=pkg_from,
         )
@@ -435,26 +438,49 @@ class AssistantCLI:
     def pull_docs_files(
         gh_user_repo: str,
         target_dir: str = "docs/source-pytorch/XXX",
-        checkout: str = "tags/1.0.0",
+        checkout: str = "refs/tags/1.0.0",
         source_dir: str = "docs/source",
+        single_page: Optional[str] = None,
+        as_orphan: bool = False,
     ) -> None:
-        """Pull docs pages from external source and append to local docs."""
+        """Pull docs pages from external source and append to local docs.
+
+        Args:
+            gh_user_repo: standard GitHub user/repo string
+            target_dir: relative location inside the docs folder
+            checkout: specific tag or branch to checkout
+            source_dir: relative location inside the remote / external repo
+            single_page: copy only single page from the remote repo and name it as the repo name
+            as_orphan: append orphan statement to the page
+
+        """
         import zipfile
 
-        zip_url = f"https://github.com/{gh_user_repo}/archive/refs/{checkout}.zip"
+        zip_url = f"https://github.com/{gh_user_repo}/archive/{checkout}.zip"
 
         with tempfile.TemporaryDirectory() as tmp:
             zip_file = os.path.join(tmp, "repo.zip")
-            urllib.request.urlretrieve(zip_url, zip_file)
+            try:
+                urllib.request.urlretrieve(zip_url, zip_file)
+            except urllib.error.HTTPError:
+                raise RuntimeError(f"Requesting file '{zip_url}' does not exist or it is just unavailable.")
 
             with zipfile.ZipFile(zip_file, "r") as zip_ref:
-                zip_ref.extractall(tmp)
+                zip_ref.extractall(tmp)  # noqa: S202
 
             zip_dirs = [d for d in glob.glob(os.path.join(tmp, "*")) if os.path.isdir(d)]
             # check that the extracted archive has only repo folder
             assert len(zip_dirs) == 1
             repo_dir = zip_dirs[0]
 
+            if single_page:  # special case for copying single page
+                single_page = os.path.join(repo_dir, source_dir, single_page)
+                assert os.path.isfile(single_page), f"File '{single_page}' does not exist."
+                name = re.sub(r"lightning[-_]?", "", gh_user_repo.split("/")[-1])
+                new_rst = os.path.join(_PROJECT_ROOT, target_dir, f"{name}.rst")
+                AssistantCLI._copy_rst(single_page, new_rst, as_orphan=as_orphan)
+                return
+            # continue with copying all pages
             ls_pages = glob.glob(os.path.join(repo_dir, source_dir, "*.rst"))
             ls_pages += glob.glob(os.path.join(repo_dir, source_dir, "**", "*.rst"))
             for rst in ls_pages:
@@ -465,7 +491,32 @@ class AssistantCLI:
                 if os.path.isfile(new_rst):
                     logging.warning(f"Page {new_rst} already exists in the local tree so it will be skipped.")
                     continue
-                shutil.copy(rst, new_rst)
+                AssistantCLI._copy_rst(rst, new_rst, as_orphan=as_orphan)
+
+    @staticmethod
+    def _copy_rst(rst_in, rst_out, as_orphan: bool = False):
+        """Copy RST page with optional inserting orphan statement."""
+        with open(rst_in, encoding="utf-8") as fopen:
+            page = fopen.read()
+        if as_orphan and ":orphan:" not in page:
+            page = ":orphan:\n\n" + page
+        with open(rst_out, "w", encoding="utf-8") as fopen:
+            fopen.write(page)
+
+    @staticmethod
+    def convert_version2nightly(ver_file: str = "src/version.info") -> None:
+        """Load the actual version and convert it to the nightly version."""
+        from datetime import datetime
+
+        with open(ver_file) as fo:
+            version = fo.read().strip()
+        # parse X.Y.Z version and prune any suffix
+        vers = re.match(r"(\d+)\.(\d+)\.(\d+).*", version)
+        # create timestamp  YYYYMMDD
+        timestamp = datetime.now().strftime("%Y%m%d")
+        version = f"{'.'.join(vers.groups())}.dev{timestamp}"
+        with open(ver_file, "w") as fo:
+            fo.write(version + os.linesep)
 
 
 if __name__ == "__main__":

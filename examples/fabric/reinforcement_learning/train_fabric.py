@@ -14,7 +14,7 @@ Requirements:
 
 
 Run it with:
-    lightning run model --accelerator=cpu --strategy=ddp --devices=2 train_fabric.py
+    fabric run --accelerator=cpu --strategy=ddp --devices=2 train_fabric.py
 """
 
 import argparse
@@ -26,13 +26,12 @@ from typing import Dict
 import gymnasium as gym
 import torch
 import torchmetrics
+from lightning.fabric import Fabric
+from lightning.fabric.loggers import TensorBoardLogger
 from rl.agent import PPOLightningAgent
 from rl.utils import linear_annealing, make_env, parse_args, test
 from torch import Tensor
 from torch.utils.data import BatchSampler, DistributedSampler, RandomSampler
-
-from lightning.fabric import Fabric
-from lightning.fabric.loggers import TensorBoardLogger
 
 
 def train(
@@ -85,14 +84,10 @@ def main(args: argparse.Namespace):
     )
 
     # Environment setup
-    envs = gym.vector.SyncVectorEnv(
-        [
-            make_env(
-                args.env_id, args.seed + rank * args.num_envs + i, rank, args.capture_video, logger.log_dir, "train"
-            )
-            for i in range(args.num_envs)
-        ]
-    )
+    envs = gym.vector.SyncVectorEnv([
+        make_env(args.env_id, args.seed + rank * args.num_envs + i, rank, args.capture_video, logger.log_dir, "train")
+        for i in range(args.num_envs)
+    ])
     assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
     # Define the agent and the optimizer and setup them with Fabric

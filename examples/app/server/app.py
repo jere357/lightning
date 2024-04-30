@@ -4,12 +4,11 @@ import io
 
 import torch
 import torchvision
-from PIL import Image
-from pydantic import BaseModel
-
-import lightning as L
+from lightning.app import CloudCompute, LightningApp
 from lightning.app.components.serve import Image as InputImage
 from lightning.app.components.serve import PythonServer
+from PIL import Image
+from pydantic import BaseModel
 
 
 class PyTorchServer(PythonServer):
@@ -21,13 +20,11 @@ class PyTorchServer(PythonServer):
     def predict(self, request):
         image = base64.b64decode(request.image.encode("utf-8"))
         image = Image.open(io.BytesIO(image))
-        transforms = torchvision.transforms.Compose(
-            [
-                torchvision.transforms.Resize(224),
-                torchvision.transforms.ToTensor(),
-                torchvision.transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
-            ]
-        )
+        transforms = torchvision.transforms.Compose([
+            torchvision.transforms.Resize(224),
+            torchvision.transforms.ToTensor(),
+            torchvision.transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+        ])
         image = transforms(image)
         image = image.to(self._device)
         prediction = self._model(image.unsqueeze(0))
@@ -38,5 +35,5 @@ class OutputData(BaseModel):
     prediction: int
 
 
-component = PyTorchServer(input_type=InputImage, output_type=OutputData, cloud_compute=L.CloudCompute("gpu"))
-app = L.LightningApp(component)
+component = PyTorchServer(input_type=InputImage, output_type=OutputData, cloud_compute=CloudCompute("gpu"))
+app = LightningApp(component)

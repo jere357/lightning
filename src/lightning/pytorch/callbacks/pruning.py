@@ -11,7 +11,11 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-r"""ModelPruning ^^^^^^^^^^^^"""
+r"""
+ModelPruning
+^^^^^^^^^^^^
+"""
+
 import inspect
 import logging
 from copy import deepcopy
@@ -20,8 +24,8 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 import torch.nn.utils.prune as pytorch_prune
 from lightning_utilities.core.apply_func import apply_to_collection
-from torch import nn, Tensor
-from typing_extensions import TypedDict
+from torch import Tensor, nn
+from typing_extensions import TypedDict, override
 
 import lightning.pytorch as pl
 from lightning.pytorch.callbacks.callback import Callback
@@ -74,8 +78,8 @@ class ModelPruning(Callback):
         verbose: int = 0,
         prune_on_train_epoch_end: bool = True,
     ) -> None:
-        """Model pruning Callback, using PyTorch's prune utilities. This callback is responsible of pruning
-        networks parameters during training.
+        """Model pruning Callback, using PyTorch's prune utilities. This callback is responsible of pruning networks
+        parameters during training.
 
         To learn more about pruning with PyTorch, please take a look at
         `this tutorial <https://pytorch.org/tutorials/intermediate/pruning_tutorial.html>`_.
@@ -152,6 +156,7 @@ class ModelPruning(Callback):
                 if ``pruning_norm`` is not provided when ``"ln_structured"``,
                 if ``pruning_fn`` is neither ``str`` nor :class:`torch.nn.utils.prune.BasePruningMethod`, or
                 if ``amount`` is none of ``int``, ``float`` and ``Callable``.
+
         """
 
         self._use_global_unstructured = use_global_unstructured
@@ -235,6 +240,7 @@ class ModelPruning(Callback):
 
         IF use_global_unstructured, pruning_fn will be resolved into its associated ``PyTorch BasePruningMethod`` ELSE,
         pruning_fn will be resolved into its function counterpart from `torch.nn.utils.prune`.
+
         """
         pruning_meth = (
             _PYTORCH_PRUNING_METHOD[pruning_fn]
@@ -259,6 +265,7 @@ class ModelPruning(Callback):
         """Removes pruning buffers from any pruned modules.
 
         Adapted from https://github.com/pytorch/pytorch/blob/v1.7.1/torch/nn/utils/prune.py#L1118-L1122
+
         """
         for _, module in module.named_modules():
             for k in list(module._forward_pre_hooks):
@@ -286,6 +293,7 @@ class ModelPruning(Callback):
         This function implements the step 4.
 
         The ``resample_parameters`` argument can be used to reset the parameters with a new :math:`\theta_z \sim \mathcal{D}_\theta`
+
         """  # noqa: E501
         assert self._original_layers is not None
         for d in self._original_layers.values():
@@ -295,7 +303,7 @@ class ModelPruning(Callback):
                 copy = deepcopy(copy)  # keep the original parameters
                 copy.reset_parameters()
             for i, name in names:
-                new, new_name = self._parameters_to_prune[i]
+                new, _ = self._parameters_to_prune[i]
                 self._copy_param(new, copy, name)
 
     def _apply_local_pruning(self, amount: float) -> None:
@@ -357,6 +365,7 @@ class ModelPruning(Callback):
                     f" {curr_mask_zeros} ({curr_mask_zeros / curr_mask_size:.2%})"
                 )
 
+    @override
     def setup(self, trainer: "pl.Trainer", pl_module: LightningModule, stage: str) -> None:
         parameters_to_prune = self.sanitize_parameters_to_prune(
             pl_module, self._parameters_to_prune, parameter_names=self._parameter_names
@@ -387,16 +396,19 @@ class ModelPruning(Callback):
         ):
             self.apply_lottery_ticket_hypothesis()
 
+    @override
     def on_train_epoch_end(self, trainer: "pl.Trainer", pl_module: LightningModule) -> None:
         if self._prune_on_train_epoch_end:
             rank_zero_debug("`ModelPruning.on_train_epoch_end`. Applying pruning")
             self._run_pruning(pl_module.current_epoch)
 
+    @override
     def on_validation_epoch_end(self, trainer: "pl.Trainer", pl_module: LightningModule) -> None:
         if not trainer.sanity_checking and not self._prune_on_train_epoch_end:
             rank_zero_debug("`ModelPruning.on_validation_epoch_end`. Applying pruning")
             self._run_pruning(pl_module.current_epoch)
 
+    @override
     def on_train_end(self, trainer: "pl.Trainer", pl_module: LightningModule) -> None:
         if self._make_pruning_permanent:
             rank_zero_debug("`ModelPruning.on_train_end`. Pruning is made permanent for this checkpoint")
@@ -419,6 +431,7 @@ class ModelPruning(Callback):
 
         return apply_to_collection(state_dict, Tensor, move_to_cpu)
 
+    @override
     def on_save_checkpoint(self, trainer: "pl.Trainer", pl_module: LightningModule, checkpoint: Dict[str, Any]) -> None:
         if self._make_pruning_permanent:
             rank_zero_debug("`ModelPruning.on_save_checkpoint`. Pruning is made permanent for this checkpoint")
@@ -436,6 +449,7 @@ class ModelPruning(Callback):
             MisconfigurationException:
                 If ``parameters_to_prune`` doesn't exist in the model, or
                 if ``parameters_to_prune`` is neither a list nor a tuple.
+
         """
         parameters = parameter_names or ModelPruning.PARAMETER_NAMES
 

@@ -8,13 +8,11 @@ import lightning.app
 
 
 def _is_attribute(member, module):
-    return all(
-        [
-            hasattr(member, "__module__") and module.__name__ in member.__module__,
-            not isinstance(member, TypeVar),
-            not isinstance(member, types.ModuleType),
-        ]
-    )
+    return all([
+        hasattr(member, "__module__") and module.__name__ in member.__module__,
+        not isinstance(member, TypeVar),
+        not isinstance(member, types.ModuleType),
+    ])
 
 
 def _find_exports(module):
@@ -44,15 +42,17 @@ def test_import_depth(
         "lightning.app.cli",
         "lightning.app.components.serve.types",
         "lightning.app.core",
+        "lightning.app.launcher",
         "lightning.app.runners",
         "lightning.app.utilities",
-    ]
+    ],
 ):
     """This test ensures that any public exports (functions, classes, etc.) can be imported by users with at most a
     depth of two. This guarantees that everything user-facing can be imported with (at most) ``lightning.app.*.*``.
 
     Args:
         ignore: Sub-module paths to ignore (usually sub-modules that are not intended to be user-facing).
+
     """
     exports = _find_exports(lightning.app)
     depths = {export: len(path.replace("lightning.app", "").split(".")) for export, path in exports.items()}

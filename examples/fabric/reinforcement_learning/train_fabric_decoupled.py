@@ -14,7 +14,7 @@ Requirements:
 
 
 Run it with:
-    lightning run model --devices=2 train_fabric_decoupled.py
+    fabric run --devices=2 train_fabric_decoupled.py
 """
 
 import argparse
@@ -25,17 +25,16 @@ from datetime import datetime
 
 import gymnasium as gym
 import torch
-from rl.agent import PPOLightningAgent
-from rl.utils import linear_annealing, make_env, parse_args, test
-from torch.distributed.algorithms.join import Join
-from torch.utils.data import BatchSampler, DistributedSampler, RandomSampler
-from torchmetrics import MeanMetric
-
 from lightning.fabric import Fabric
 from lightning.fabric.loggers import TensorBoardLogger
 from lightning.fabric.plugins.collectives import TorchCollective
 from lightning.fabric.plugins.collectives.collective import CollectibleGroup
 from lightning.fabric.strategies import DDPStrategy
+from rl.agent import PPOLightningAgent
+from rl.utils import linear_annealing, make_env, parse_args, test
+from torch.distributed.algorithms.join import Join
+from torch.utils.data import BatchSampler, DistributedSampler, RandomSampler
+from torchmetrics import MeanMetric
 
 
 @torch.no_grad()
@@ -60,9 +59,9 @@ def player(args, world_collective: TorchCollective, player_trainer_collective: T
     )
 
     # Environment setup
-    envs = gym.vector.SyncVectorEnv(
-        [make_env(args.env_id, args.seed + i, 0, args.capture_video, log_dir, "train") for i in range(args.num_envs)]
-    )
+    envs = gym.vector.SyncVectorEnv([
+        make_env(args.env_id, args.seed + i, 0, args.capture_video, log_dir, "train") for i in range(args.num_envs)
+    ])
     assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
     # Define the agent
@@ -105,10 +104,9 @@ def player(args, world_collective: TorchCollective, player_trainer_collective: T
     if not args.share_data:
         if single_global_step < world_collective.world_size - 1:
             raise RuntimeError(
-                "The number of trainers ({}) is greater than the available collected data ({}). ".format(
-                    world_collective.world_size - 1, single_global_step
-                )
-                + "Consider to lower the number of trainers at least to the size of available collected data"
+                f"The number of trainers ({world_collective.world_size - 1})"
+                f" is greater than the available collected data ({single_global_step})."
+                f" Consider to lower the number of trainers at least to the size of available collected data"
             )
         chunks_sizes = [
             len(chunk)

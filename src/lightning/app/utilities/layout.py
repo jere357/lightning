@@ -26,6 +26,7 @@ def _add_comment_to_literal_code(method, contains, comment):
     """Inspects a method's code and adds a message to it.
 
     This is a nice to have, so if it fails for some reason, it shouldn't affect the program.
+
     """
     try:
         lines = inspect.getsource(method)
@@ -164,7 +165,7 @@ def _collect_content_layout(
             m = f"""
             A dictionary returned by `{flow.__class__.__name__}.configure_layout()` contains an unsupported entry.
 
-            {{'content': {repr(entry['content'])}}}
+            {{'content': {repr(entry["content"])}}}
 
             Set the `content` key to a child flow or a URL, for example:
 
@@ -185,6 +186,7 @@ def _collect_work_layout(work: "lightning.app.LightningWork") -> Union[None, str
 
     Raises:
         TypeError: If the value returned by ``configure_layout`` is not of a supported format.
+
     """
     work_layout = work.configure_layout() if is_overridden("configure_layout", work) else work.url
 

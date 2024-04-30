@@ -10,6 +10,15 @@ from unittest import mock
 from unittest.mock import MagicMock
 
 import pytest
+from lightning.app import BuildConfig, LightningApp, LightningFlow, LightningWork
+from lightning.app.runners import CloudRuntime, backends, cloud
+from lightning.app.source_code.copytree import _copytree, _parse_lightningignore
+from lightning.app.source_code.local import LocalSourceCodeDir
+from lightning.app.storage import Drive, Mount
+from lightning.app.testing.helpers import EmptyWork
+from lightning.app.utilities.cloud import _get_project
+from lightning.app.utilities.dependency_caching import get_hash
+from lightning.app.utilities.packaging.cloud_compute import CloudCompute
 from lightning_cloud.openapi import (
     CloudspaceIdRunsBody,
     Externalv1Cluster,
@@ -29,7 +38,6 @@ from lightning_cloud.openapi import (
     V1DriveStatus,
     V1DriveType,
     V1EnvVar,
-    V1GetClusterResponse,
     V1GetUserResponse,
     V1LightningappInstanceSpec,
     V1LightningappInstanceState,
@@ -57,16 +65,6 @@ from lightning_cloud.openapi import (
     V1UserRequestedFlowComputeConfig,
     V1Work,
 )
-
-from lightning.app import BuildConfig, LightningApp, LightningFlow, LightningWork
-from lightning.app.runners import backends, cloud, CloudRuntime
-from lightning.app.source_code.copytree import _copytree, _parse_lightningignore
-from lightning.app.source_code.local import LocalSourceCodeDir
-from lightning.app.storage import Drive, Mount
-from lightning.app.testing.helpers import EmptyWork
-from lightning.app.utilities.cloud import _get_project
-from lightning.app.utilities.dependency_caching import get_hash
-from lightning.app.utilities.packaging.cloud_compute import CloudCompute
 
 
 class MyWork(LightningWork):
@@ -98,6 +96,7 @@ def get_cloud_runtime_request_body(**kwargs) -> "CloudspaceIdRunsBody":
         "app_entrypoint_file": mock.ANY,
         "enable_app_server": True,
         "is_headless": True,
+        "should_mount_cloudspace_content": False,
         "flow_servers": [],
         "image_spec": None,
         "works": [],
@@ -144,9 +143,9 @@ class TestAppCreationClient:
             memberships=[V1Membership(name="Default Project", project_id=project_id)]
         )
 
-        mock_client.cluster_service_list_clusters.return_value = V1ListClustersResponse(
-            [Externalv1Cluster(id=DEFAULT_CLUSTER)]
-        )
+        mock_client.cluster_service_list_clusters.return_value = V1ListClustersResponse([
+            Externalv1Cluster(id=DEFAULT_CLUSTER)
+        ])
         cloud_backend.client = mock_client
 
         app = mock.MagicMock()
@@ -193,12 +192,10 @@ class TestAppCreationClient:
         # Note:
         # backend converts "None" cluster to "litng-ai-03"
         # dispatch should receive None, but API calls should return "litng-ai-03"
-        mock_client.cluster_service_list_clusters.return_value = V1ListClustersResponse(
-            [
-                Externalv1Cluster(id=old_cluster or DEFAULT_CLUSTER),
-                Externalv1Cluster(id=new_cluster or DEFAULT_CLUSTER),
-            ]
-        )
+        mock_client.cluster_service_list_clusters.return_value = V1ListClustersResponse([
+            Externalv1Cluster(id=old_cluster or DEFAULT_CLUSTER),
+            Externalv1Cluster(id=new_cluster or DEFAULT_CLUSTER),
+        ])
 
         mock_client.projects_service_list_project_cluster_bindings.return_value = V1ListProjectClusterBindingsResponse(
             clusters=[
@@ -208,7 +205,7 @@ class TestAppCreationClient:
         )
 
         # Mock all clusters as global clusters
-        mock_client.cluster_service_get_cluster.side_effect = lambda cluster_id: V1GetClusterResponse(
+        mock_client.cluster_service_get_cluster.side_effect = lambda cluster_id: Externalv1Cluster(
             id=cluster_id, spec=V1ClusterSpec(cluster_type=V1ClusterType.GLOBAL)
         )
 
@@ -253,6 +250,7 @@ class TestAppCreationClient:
         """Deleted apps show up in list apps but not in list instances.
 
         This tests that we don't try to reacreate a previously deleted app.
+
         """
         entrypoint = Path(tmpdir) / "entrypoint.py"
         entrypoint.touch()
@@ -267,16 +265,16 @@ class TestAppCreationClient:
             cluster_id=DEFAULT_CLUSTER
         )
 
-        mock_client.cluster_service_list_clusters.return_value = V1ListClustersResponse(
-            [Externalv1Cluster(id=DEFAULT_CLUSTER)]
-        )
+        mock_client.cluster_service_list_clusters.return_value = V1ListClustersResponse([
+            Externalv1Cluster(id=DEFAULT_CLUSTER)
+        ])
 
         mock_client.projects_service_list_project_cluster_bindings.return_value = V1ListProjectClusterBindingsResponse(
             clusters=[V1ProjectClusterBinding(cluster_id=DEFAULT_CLUSTER)]
         )
 
         # Mock all clusters as global clusters
-        mock_client.cluster_service_get_cluster.side_effect = lambda cluster_id: V1GetClusterResponse(
+        mock_client.cluster_service_get_cluster.side_effect = lambda cluster_id: Externalv1Cluster(
             id=cluster_id, spec=V1ClusterSpec(cluster_type=V1ClusterType.GLOBAL)
         )
 
@@ -365,9 +363,9 @@ class TestAppCreationClient:
             V1ListLightningappInstancesResponse(lightningapps=[])
         )
         mock_client.cloud_space_service_create_lightning_run.return_value = V1LightningRun(cluster_id="test1234")
-        mock_client.cluster_service_list_clusters.return_value = V1ListClustersResponse(
-            [Externalv1Cluster(id="test1234")]
-        )
+        mock_client.cluster_service_list_clusters.return_value = V1ListClustersResponse([
+            Externalv1Cluster(id="test1234")
+        ])
         cloud_backend = mock.MagicMock()
         cloud_backend.client = mock_client
         monkeypatch.setattr(backends, "CloudBackend", mock.MagicMock(return_value=cloud_backend))
@@ -386,6 +384,7 @@ class TestAppCreationClient:
             app_entrypoint_file=mock.ANY,
             enable_app_server=True,
             is_headless=False,
+            should_mount_cloudspace_content=False,
             flow_servers=[],
             image_spec=None,
             works=[],
@@ -433,6 +432,7 @@ class TestAppCreationClient:
             app_entrypoint_file=mock.ANY,
             enable_app_server=True,
             is_headless=False,
+            should_mount_cloudspace_content=False,
             flow_servers=[],
             image_spec=None,
             works=[],
@@ -491,6 +491,7 @@ class TestAppCreationClient:
             app_entrypoint_file=mock.ANY,
             enable_app_server=True,
             is_headless=False,
+            should_mount_cloudspace_content=False,
             flow_servers=[],
             image_spec=None,
             works=[],
@@ -546,14 +547,14 @@ class TestAppCreationClient:
 
         # testing with no-cache False
         cloud_runtime.dispatch(no_cache=False)
-        (func_name, args, kwargs) = cloud_runtime.backend.client.cloud_space_service_create_lightning_run.mock_calls[0]
+        _, _, kwargs = cloud_runtime.backend.client.cloud_space_service_create_lightning_run.mock_calls[0]
         body = kwargs["body"]
         assert body.dependency_cache_key == "dummy-hash"
 
         # testing with no-cache True
         mock_client.reset_mock()
         cloud_runtime.dispatch(no_cache=True)
-        (func_name, args, kwargs) = cloud_runtime.backend.client.cloud_space_service_create_lightning_run.mock_calls[0]
+        _, _, kwargs = cloud_runtime.backend.client.cloud_space_service_create_lightning_run.mock_calls[0]
         body = kwargs["body"]
         assert body.dependency_cache_key is None
 
@@ -584,7 +585,7 @@ class TestAppCreationClient:
         mock_client.projects_service_list_project_cluster_bindings.return_value = V1ListProjectClusterBindingsResponse(
             clusters=[V1ProjectClusterBinding(cluster_id="test")]
         )
-        mock_client.cluster_service_get_cluster.side_effect = lambda cluster_id: V1GetClusterResponse(
+        mock_client.cluster_service_get_cluster.side_effect = lambda cluster_id: Externalv1Cluster(
             id=cluster_id, spec=V1ClusterSpec(cluster_type=V1ClusterType.GLOBAL)
         )
         mock_client.cloud_space_service_create_lightning_run_instance.return_value = V1LightningRun()
@@ -624,6 +625,7 @@ class TestAppCreationClient:
                 app_entrypoint_file="entrypoint.py",
                 enable_app_server=True,
                 is_headless=False,
+                should_mount_cloudspace_content=False,
                 flow_servers=[],
                 dependency_cache_key=get_hash(requirements_file),
                 user_requested_flow_compute_config=mock.ANY,
@@ -639,6 +641,7 @@ class TestAppCreationClient:
                 expected_body.works = [
                     V1Work(
                         name="test-work",
+                        display_name="",
                         spec=V1LightningworkSpec(
                             build_spec=V1BuildSpec(
                                 commands=["echo 'start'"],
@@ -759,7 +762,7 @@ class TestAppCreationClient:
         mock_client.projects_service_list_project_cluster_bindings.return_value = V1ListProjectClusterBindingsResponse(
             clusters=[V1ProjectClusterBinding(cluster_id="test")]
         )
-        mock_client.cluster_service_get_cluster.side_effect = lambda cluster_id: V1GetClusterResponse(
+        mock_client.cluster_service_get_cluster.side_effect = lambda cluster_id: Externalv1Cluster(
             id=cluster_id, spec=V1ClusterSpec(cluster_type=V1ClusterType.GLOBAL)
         )
         mock_client.cloud_space_service_create_lightning_run_instance.return_value = V1LightningRun()
@@ -813,6 +816,7 @@ class TestAppCreationClient:
                 app_entrypoint_file="entrypoint.py",
                 enable_app_server=True,
                 is_headless=False,
+                should_mount_cloudspace_content=False,
                 flow_servers=[],
                 dependency_cache_key=get_hash(requirements_file),
                 user_requested_flow_compute_config=mock.ANY,
@@ -825,6 +829,7 @@ class TestAppCreationClient:
                 works=[
                     V1Work(
                         name="test-work",
+                        display_name="",
                         spec=V1LightningworkSpec(
                             build_spec=V1BuildSpec(
                                 commands=["echo 'start'"],
@@ -893,7 +898,7 @@ class TestAppCreationClient:
             mock_client.projects_service_list_project_cluster_bindings.return_value = (
                 V1ListProjectClusterBindingsResponse(clusters=[V1ProjectClusterBinding(cluster_id="test")])
             )
-            mock_client.cluster_service_get_cluster.side_effect = lambda cluster_id: V1GetClusterResponse(
+            mock_client.cluster_service_get_cluster.side_effect = lambda cluster_id: Externalv1Cluster(
                 id=cluster_id, spec=V1ClusterSpec(cluster_type=V1ClusterType.GLOBAL)
             )
         mock_client.cloud_space_service_list_cloud_spaces.return_value = V1ListCloudSpacesResponse(
@@ -942,6 +947,7 @@ class TestAppCreationClient:
                 app_entrypoint_file="entrypoint.py",
                 enable_app_server=True,
                 is_headless=False,
+                should_mount_cloudspace_content=False,
                 flow_servers=[],
                 dependency_cache_key=get_hash(requirements_file),
                 user_requested_flow_compute_config=mock.ANY,
@@ -954,6 +960,7 @@ class TestAppCreationClient:
                 works=[
                     V1Work(
                         name="test-work",
+                        display_name="",
                         spec=V1LightningworkSpec(
                             build_spec=V1BuildSpec(
                                 commands=["echo 'start'"],
@@ -1021,7 +1028,7 @@ class TestAppCreationClient:
                     ]
                 )
             )
-            mock_client.cluster_service_get_cluster.side_effect = lambda cluster_id: V1GetClusterResponse(
+            mock_client.cluster_service_get_cluster.side_effect = lambda cluster_id: Externalv1Cluster(
                 id=cluster_id, spec=V1ClusterSpec(cluster_type=V1ClusterType.GLOBAL)
             )
         mock_client.cloud_space_service_list_cloud_spaces.return_value = V1ListCloudSpacesResponse(
@@ -1112,6 +1119,7 @@ class TestAppCreationClient:
                 app_entrypoint_file="entrypoint.py",
                 enable_app_server=True,
                 is_headless=False,
+                should_mount_cloudspace_content=False,
                 flow_servers=[],
                 dependency_cache_key=get_hash(requirements_file),
                 user_requested_flow_compute_config=mock.ANY,
@@ -1124,6 +1132,7 @@ class TestAppCreationClient:
                 works=[
                     V1Work(
                         name="test-work",
+                        display_name="",
                         spec=V1LightningworkSpec(
                             build_spec=V1BuildSpec(
                                 commands=["echo 'start'"],
@@ -1153,6 +1162,7 @@ class TestAppCreationClient:
                 app_entrypoint_file="entrypoint.py",
                 enable_app_server=True,
                 is_headless=False,
+                should_mount_cloudspace_content=False,
                 flow_servers=[],
                 dependency_cache_key=get_hash(requirements_file),
                 user_requested_flow_compute_config=mock.ANY,
@@ -1165,6 +1175,7 @@ class TestAppCreationClient:
                 works=[
                     V1Work(
                         name="test-work",
+                        display_name="",
                         spec=V1LightningworkSpec(
                             build_spec=V1BuildSpec(
                                 commands=["echo 'start'"],
@@ -1233,7 +1244,7 @@ class TestAppCreationClient:
             mock_client.projects_service_list_project_cluster_bindings.return_value = (
                 V1ListProjectClusterBindingsResponse(clusters=[V1ProjectClusterBinding(cluster_id="test")])
             )
-            mock_client.cluster_service_get_cluster.side_effect = lambda cluster_id: V1GetClusterResponse(
+            mock_client.cluster_service_get_cluster.side_effect = lambda cluster_id: Externalv1Cluster(
                 id=cluster_id, spec=V1ClusterSpec(cluster_type=V1ClusterType.GLOBAL)
             )
         mock_client.cloud_space_service_list_cloud_spaces.return_value = V1ListCloudSpacesResponse(
@@ -1300,6 +1311,7 @@ class TestAppCreationClient:
                 app_entrypoint_file="entrypoint.py",
                 enable_app_server=True,
                 is_headless=False,
+                should_mount_cloudspace_content=False,
                 flow_servers=[],
                 dependency_cache_key=get_hash(requirements_file),
                 image_spec=Gridv1ImageSpec(
@@ -1312,6 +1324,7 @@ class TestAppCreationClient:
                 works=[
                     V1Work(
                         name="test-work",
+                        display_name="",
                         spec=V1LightningworkSpec(
                             build_spec=V1BuildSpec(
                                 commands=["echo 'start'"],
@@ -1524,9 +1537,6 @@ class TestOpen:
             project_id="test-project-id", cloudspace_id="cloudspace_id", body=mock.ANY
         )
 
-        out, _ = capsys.readouterr()
-        assert "will not overwrite the files in your CloudSpace." in out
-
     def test_not_enabled(self, monkeypatch, capsys):
         """Tests that an error is printed and the call exits if the feature isn't enabled for the user."""
         mock_client = mock.MagicMock()
@@ -1553,7 +1563,7 @@ class TestOpen:
         out, _ = capsys.readouterr()
 
         assert exited
-        assert "`lightning open` command has not been enabled" in out
+        assert "`lightning_app open` command has not been enabled" in out
 
 
 class TestCloudspaceDispatch:
@@ -1610,14 +1620,12 @@ class TestCloudspaceDispatch:
         mock_app.works = [mock.MagicMock()]
         cloud_runtime = cloud.CloudRuntime(app=mock_app, entrypoint=Path("."))
 
-        cloud_runtime.cloudspace_dispatch("project_id", "cloudspace_id", "run_name", "cluster_id")
+        app = cloud_runtime.cloudspace_dispatch("project_id", "cloudspace_id", "run_name", "cluster_id")
+        assert app.id == "instance_id"
 
         mock_client.cloud_space_service_get_cloud_space.assert_called_once_with(
             project_id="project_id", id="cloudspace_id"
         )
-
-        if custom_env_sync_path_value is not None:
-            mock_repo.prepare_sys_customizations_sync.assert_called_once_with(custom_env_sync_path_value)
 
         mock_client.cloud_space_service_create_lightning_run.assert_called_once_with(
             project_id="project_id", cloudspace_id="cloudspace_id", body=mock.ANY
@@ -1791,6 +1799,7 @@ def test_load_app_from_file():
             "web",
             [
                 {
+                    "displayName": "",
                     "name": "root.work",
                     "spec": {
                         "buildSpec": {
@@ -1815,6 +1824,7 @@ def test_load_app_from_file():
             "gallery",
             [
                 {
+                    "display_name": "",
                     "name": "root.work",
                     "spec": {
                         "build_spec": {
@@ -1869,10 +1879,11 @@ def test_print_specs(tmpdir, caplog, monkeypatch, print_format, expected):
 
 
 def test_incompatible_cloud_compute_and_build_config(monkeypatch):
-    """Test that an exception is raised when a build config has a custom image defined, but the cloud compute is
-    the default.
+    """Test that an exception is raised when a build config has a custom image defined, but the cloud compute is the
+    default.
 
     This combination is not supported by the platform.
+
     """
     mock_client = mock.MagicMock()
     cloud_backend = mock.MagicMock(client=mock_client)
@@ -1951,9 +1962,7 @@ def test_programmatic_lightningignore(monkeypatch, caplog, tmpdir):
         "lightning.app.runners.cloud._parse_lightningignore", wraps=_parse_lightningignore
     ) as parse_mock, mock.patch(
         "lightning.app.source_code.local._copytree", wraps=_copytree
-    ) as copy_mock, caplog.at_level(
-        logging.WARN
-    ):
+    ) as copy_mock, caplog.at_level(logging.WARN):
         cloud_runtime.dispatch()
 
     parse_mock.assert_called_once_with(("foo", "foo", "lightning_logs"))
@@ -2002,9 +2011,7 @@ def test_default_lightningignore(monkeypatch, caplog, tmpdir):
         "lightning.app.runners.cloud._parse_lightningignore", wraps=_parse_lightningignore
     ) as parse_mock, mock.patch(
         "lightning.app.source_code.local._copytree", wraps=_copytree
-    ) as copy_mock, caplog.at_level(
-        logging.WARN
-    ):
+    ) as copy_mock, caplog.at_level(logging.WARN):
         cloud_runtime.dispatch()
 
     parse_mock.assert_called_once_with(())

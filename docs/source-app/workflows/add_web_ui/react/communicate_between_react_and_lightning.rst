@@ -13,11 +13,11 @@ Communicate Between React and Lightning
 Example code
 ************
 To illustrate how to communicate between a React app and a lightning App, we'll be using the `example_app.py` file
-which `lightning init react-ui <create_react_template.html>`_ created:
+which :doc:`lightning init react-ui <create_react_template>` created:
 
 .. literalinclude:: ../../../../../src/lightning/app/cli/react-ui-template/example_app.py
 
-and the App.tsx file also created by `lightning init react-ui <create_react_template.html>`_:
+and the App.tsx file also created by :doc:`lightning init react-ui <create_react_template>`:
 
 .. literalinclude:: ../../../../../src/lightning/app/cli/react-ui-template/ui/src/App.tsx
 
@@ -47,7 +47,7 @@ Update React <-- Lightning app
 ******************************
 To change the React app from the Lightning app, use the values from the `lightningState`.
 
-In this example, when the `react_ui.counter`` increaes in the Lightning app:
+In this example, when the ``react_ui.counter`` increaes in the Lightning app:
 
 .. literalinclude:: ../../../../../src/lightning/app/cli/react-ui-template/example_app.py
     :emphasize-lines: 18, 24

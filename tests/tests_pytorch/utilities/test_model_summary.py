@@ -17,17 +17,16 @@ from typing import Any
 import pytest
 import torch
 import torch.nn as nn
-
-from lightning.fabric.utilities.imports import _TORCH_GREATER_EQUAL_2_0
 from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.demos.boring_classes import BoringModel
 from lightning.pytorch.utilities.model_summary.model_summary import (
     LEFTOVER_PARAMS_NAME,
-    ModelSummary,
     NOT_APPLICABLE,
-    summarize,
     UNKNOWN_SIZE,
+    ModelSummary,
+    summarize,
 )
+
 from tests_pytorch.helpers.advanced_models import ParityModuleRNN
 from tests_pytorch.helpers.runif import RunIf
 
@@ -294,10 +293,6 @@ def test_example_input_array_types(example_input, expected_size, max_depth):
         def forward(self, *args, **kwargs):
             return self.layer(*args, **kwargs)
 
-    if isinstance(example_input, dict) and not _TORCH_GREATER_EQUAL_2_0:
-        # kwargs are not supported when torch < 2.0
-        expected_size = UNKNOWN_SIZE
-
     model = DummyLightningModule()
     model.example_input_array = example_input
     summary = summarize(model, max_depth=max_depth)
@@ -327,13 +322,13 @@ def test_empty_model_size(max_depth):
         pytest.param("mps", marks=RunIf(mps=True)),
     ],
 )
-def test_model_size_precision(tmpdir, accelerator):
+def test_model_size_precision(tmp_path, accelerator):
     """Test model size for half and full precision."""
     model = PreCalculatedModel()
 
     # fit model
     trainer = Trainer(
-        default_root_dir=tmpdir, accelerator=accelerator, devices=1, max_steps=1, max_epochs=1, precision=32
+        default_root_dir=tmp_path, accelerator=accelerator, devices=1, max_steps=1, max_epochs=1, precision=32
     )
     trainer.fit(model)
     summary = summarize(model)
@@ -345,11 +340,7 @@ def test_lazy_model_summary():
     lazy_model = LazyModel()
     summary = ModelSummary(lazy_model)
 
-    with pytest.warns(
-        UserWarning,
-        match=r"A layer with UninitializedParameter was found. "
-        r"Thus, the total number of parameters detected may be inaccurate.",
-    ):
+    with pytest.warns(UserWarning, match="The total number of parameters detected may be inaccurate."):
         assert summary.total_parameters == 0
         assert summary.trainable_parameters == 0
 
@@ -405,3 +396,54 @@ def test_summary_data_with_no_non_layer_params():
     summary = summarize(PreCalculatedModel())
     summary_data = OrderedDict(summary._get_summary_data())
     assert summary_data["Name"][-1] != LEFTOVER_PARAMS_NAME
+
+
+def test_summary_restores_module_mode():
+    """Test that the model summary puts the model in `eval()` mode, but restores the original mode once finished."""
+
+    class Model(LightningModule):
+        def __init__(self):
+            super().__init__()
+            self.layer1 = torch.nn.Linear(2, 2)
+            self.layer2 = torch.nn.Linear(2, 2)
+            self.example_input_array = torch.rand(2, 2)
+
+        def forward(self, x):
+            assert not self.training
+            assert not self.layer1.training
+            assert not self.layer2.training
+            return self.layer2(self.layer1(x))
+
+    model = Model()
+    model.layer1.train()
+    model.layer2.eval()
+    summarize(model)
+    assert model.training
+    assert model.layer1.training
+    assert not model.layer2.training
+
+
+def test_summary_training_mode():
+    """Test that the model summary captures the training mode on all submodules."""
+    model = DeepNestedModel()
+    model.branch1[1][0].eval()
+    model.branch2.eval()
+
+    summary = summarize(model, max_depth=1)
+    summary_data = OrderedDict(summary._get_summary_data())
+    assert summary_data["Mode"] == [
+        "train",  # branch1
+        "eval",  # branch2
+        "train",  # head
+    ]
+
+    summary = summarize(model, max_depth=-1)
+    expected_eval = {"branch1.1.0", "branch2"}
+    for name, layer_summary in summary._layer_summary.items():
+        assert (name in expected_eval) == (not layer_summary.training)
+
+    # A model with params not belonging to a layer
+    model = NonLayerParamsModel()
+    model.layer.eval()
+    summary_data = OrderedDict(summarize(model)._get_summary_data())
+    assert summary_data["Mode"] == ["eval", "n/a"]

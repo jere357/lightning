@@ -7,7 +7,7 @@ from torch.utils.data import DataLoader, random_split
 from torchvision import transforms as T
 from torchvision.datasets import MNIST
 
-import pytorch_lightning as pl
+import lightning.pytorch as pl
 
 
 class LitAutoEncoder(pl.LightningModule):
@@ -25,7 +25,7 @@ class LitAutoEncoder(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         # training_step defines the train loop.
         # It is independent of forward
-        x, y = batch
+        x, _ = batch
         x = x.view(x.size(0), -1)
         z = self.encoder(x)
         x_hat = self.decoder(z)

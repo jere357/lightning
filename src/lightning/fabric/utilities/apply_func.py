@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Utilities used for collections."""
+
 from abc import ABC
 from functools import partial
 from typing import Any, Callable, List, Tuple, Union
@@ -27,7 +28,7 @@ _BLOCKING_DEVICE_TYPES = ("cpu", "mps")
 
 
 def _from_numpy(value: np.ndarray, device: _DEVICE) -> Tensor:
-    return torch.from_numpy(value).to(device)  # type: ignore[arg-type]
+    return torch.from_numpy(value).to(device)
 
 
 CONVERSION_DTYPES: List[Tuple[Any, Callable[[Any, Any], Tensor]]] = [
@@ -56,6 +57,7 @@ class _TransferableDataType(ABC):
         ...         return self
         >>> isinstance(CustomObject(), _TransferableDataType)
         True
+
     """
 
     @classmethod
@@ -81,6 +83,7 @@ def move_data_to_device(batch: Any, device: _DEVICE) -> Any:
     See Also:
         - :meth:`torch.Tensor.to`
         - :class:`torch.device`
+
     """
     if isinstance(device, str):
         device = torch.device(device)
@@ -113,6 +116,7 @@ def convert_tensors_to_scalars(data: Any) -> Any:
     Raises:
         ValueError:
             If tensors inside ``metrics`` contains multiple elements, hence preventing conversion to a scalar.
+
     """
 
     def to_item(value: Tensor) -> Union[int, float, bool]:

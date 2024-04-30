@@ -3,14 +3,14 @@ import traceback
 from typing import Any, Dict, List, Optional, Tuple
 
 from lightning.app.components.python import TracerPythonScript
-from lightning.app.storage import Path
+from lightning.app.storage.path import Path
 from lightning.app.utilities.packaging.build_config import BuildConfig, load_requirements
 from lightning.app.utilities.tracer import Tracer
 
 
 class ScriptRunner(TracerPythonScript):
-    """The ScriptRunner executes the script using ``runpy`` and also patches the Trainer methods to inject
-    additional code."""
+    """The ScriptRunner executes the script using ``runpy`` and also patches the Trainer methods to inject additional
+    code."""
 
     def __init__(self, root_path: str, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, cloud_build_config=self._get_build_config(root_path), **kwargs)
@@ -25,9 +25,9 @@ class ScriptRunner(TracerPythonScript):
         self.logger_metadatas: List[Dict[str, str]] = []
 
     def configure_tracer(self) -> Tracer:
-        from core.callbacks import PLAppArtifactsTracker, PLAppProgressTracker, PLAppSummary, PLAppTrainerStateTracker
-
         from lightning.pytorch import Trainer
+
+        from core.callbacks import PLAppArtifactsTracker, PLAppProgressTracker, PLAppSummary, PLAppTrainerStateTracker
 
         tracer = Tracer()
         trainer_artifacts_tracker = PLAppArtifactsTracker(work=self)
@@ -37,14 +37,12 @@ class ScriptRunner(TracerPythonScript):
 
         def pre_trainer_init(_, *args: Any, **kwargs: Any) -> Tuple[Dict, Tuple[Any, ...], Dict[str, Any]]:
             kwargs.setdefault("callbacks", [])
-            kwargs["callbacks"].extend(
-                [
-                    trainer_artifacts_tracker,
-                    trainer_state_tracker,
-                    progress_tracker,
-                    summary,
-                ]
-            )
+            kwargs["callbacks"].extend([
+                trainer_artifacts_tracker,
+                trainer_state_tracker,
+                progress_tracker,
+                summary,
+            ])
             return {}, args, kwargs
 
         tracer.add_traced(Trainer, "__init__", pre_fn=pre_trainer_init)

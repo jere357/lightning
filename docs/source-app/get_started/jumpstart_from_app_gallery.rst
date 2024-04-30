@@ -29,12 +29,14 @@ User Workflow
 
 #. By clicking **Clone & Run**, a copy of the App is added to your account and an instance starts running.
 
-    .. raw:: html
 
-        <br />
-        <video id="background-video" autoplay loop muted controls poster="https://pl-public-data.s3.amazonaws.com/assets_lightning/clone_and_run.png" width="100%">
-            <source src="https://pl-public-data.s3.amazonaws.com/assets_lightning/clone_and_run.mp4" type="video/mp4" width="100%">
-        </video>
+    .. video:: https://pl-public-data.s3.amazonaws.com/assets_lightning/clone_and_run.mp4
+        :poster: https://pl-public-data.s3.amazonaws.com/assets_lightning/clone_and_run.png
+        :width: 600
+        :class: background-video
+        :autoplay:
+        :loop:
+        :muted:
 
 #. If you found an App that matches what you need, move to **step 5**! Otherwise, go back to **step 1**.
 
@@ -52,40 +54,42 @@ User Workflow
 
     .. code-block:: bash
 
-        lightning install app lightning/hackernews-app
+        lightning_app install app lightning/hackernews-app
 
 #. Go through the installation steps.
 
-    .. raw:: html
-
-        <br />
-        <video id="background-video" autoplay loop muted controls poster="https://pl-public-data.s3.amazonaws.com/assets_lightning/install_an_app.png" width="100%">
-            <source src="https://pl-public-data.s3.amazonaws.com/assets_lightning/install_an_app.mp4" type="video/mp4" width="100%">
-        </video>
+    .. video:: https://pl-public-data.s3.amazonaws.com/assets_lightning/install_an_app.mp4
+        :poster: https://pl-public-data.s3.amazonaws.com/assets_lightning/install_an_app.png
+        :width: 600
+        :class: background-video
+        :autoplay:
+        :loop:
+        :muted:
 
 #. Run the App locally.
 
     .. code-block:: bash
 
         cd LAI-Hackernews-App
-        lightning run app app.py
+        lightning_app run app app.py
 
-    .. raw:: html
-
-        <br />
-        <video id="background-video" autoplay loop muted controls poster="https://pl-public-data.s3.amazonaws.com/assets_lightning/hackernews.png" width="100%">
-            <source src="https://pl-public-data.s3.amazonaws.com/assets_lightning/hackernews.mp4" type="video/mp4" width="100%">
-        </video>
+    .. video:: https://pl-public-data.s3.amazonaws.com/assets_lightning/hackernews.mp4
+        :poster: https://pl-public-data.s3.amazonaws.com/assets_lightning/hackernews.png
+        :width: 600
+        :class: background-video
+        :autoplay:
+        :loop:
+        :muted:
 
 #. Open the code with your favorite IDE, modify it, and run it back in the cloud.
 
-    .. raw:: html
-
-        <br />
-        <video id="background-video" autoplay loop muted controls poster="https://pl-public-data.s3.amazonaws.com/assets_lightning/hackernews_modified.png" width="100%">
-            <source src="https://pl-public-data.s3.amazonaws.com/assets_lightning/hackernews_modified.mp4" type="video/mp4" width="100%">
-        </video>
-        <br />
+    .. video:: https://pl-public-data.s3.amazonaws.com/assets_lightning/hackernews_modified.mp4
+        :poster: https://pl-public-data.s3.amazonaws.com/assets_lightning/hackernews_modified.png
+        :width: 600
+        :class: background-video
+        :autoplay:
+        :loop:
+        :muted:
 
 ----
 

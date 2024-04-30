@@ -2,7 +2,6 @@ import os
 from time import sleep, time
 
 import pytest
-
 from lightning.app import LightningWork
 from lightning.app.core.queues import QueuingSystem
 from lightning.app.testing.helpers import _RunIf
@@ -12,7 +11,7 @@ from lightning.app.utilities.packaging.docker import DockerRunner
 from lightning.app.utilities.redis import check_if_redis_running
 
 
-@pytest.mark.skip(reason="FIXME (tchaton)")
+@pytest.mark.xfail(strict=False, reason="FIXME (tchaton)")
 @pytest.mark.skipif(not _is_docker_available(), reason="docker is required for this test.")
 @pytest.mark.skipif(not check_if_redis_running(), reason="redis is required for this test.")
 @_RunIf(skip_windows=True)
@@ -41,14 +40,12 @@ def test_docker_runner():
     docker_runner.run()
 
     caller_queue = queues.get_caller_queue(work_name=work.name, queue_id=queue_id)
-    caller_queue.put(
-        {
-            "args": (),
-            "kwargs": {},
-            "call_hash": call_hash,
-            "state": work.state,
-        }
-    )
+    caller_queue.put({
+        "args": (),
+        "kwargs": {},
+        "call_hash": call_hash,
+        "state": work.state,
+    })
     delta_queue = queues.get_delta_queue(queue_id=queue_id)
     delta_1 = delta_queue.get()
     delta_2 = delta_queue.get()

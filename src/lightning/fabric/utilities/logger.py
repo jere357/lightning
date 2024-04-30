@@ -11,8 +11,9 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
+import json
 from argparse import Namespace
+from dataclasses import asdict, is_dataclass
 from typing import Any, Dict, Mapping, MutableMapping, Optional, Union
 
 import numpy as np
@@ -27,6 +28,7 @@ def _convert_params(params: Optional[Union[Dict[str, Any], Namespace]]) -> Dict[
 
     Returns:
         params as a dictionary
+
     """
     # in case converting from namespace
     if isinstance(params, Namespace):
@@ -46,6 +48,7 @@ def _sanitize_callable_params(params: Dict[str, Any]) -> Dict[str, Any]:
 
     Returns:
         dictionary with all callables sanitized
+
     """
 
     def _sanitize_callable(val: Any) -> Any:
@@ -81,12 +84,16 @@ def _flatten_dict(params: MutableMapping[Any, Any], delimiter: str = "/", parent
         {'a/b': 123}
         >>> _flatten_dict({5: {'a': 123}})
         {'5/a': 123}
+
     """
     result: Dict[str, Any] = {}
     for k, v in params.items():
         new_key = parent_key + delimiter + str(k) if parent_key else str(k)
-        if isinstance(v, Namespace):
+        if is_dataclass(v):
+            v = asdict(v)
+        elif isinstance(v, Namespace):
             v = vars(v)
+
         if isinstance(v, MutableMapping):
             result = {**result, **_flatten_dict(v, parent_key=new_key, delimiter=delimiter)}
         else:
@@ -114,6 +121,7 @@ def _sanitize_params(params: Dict[str, Any]) -> Dict[str, Any]:
         'list': '[1, 2, 3]',
         'namespace': 'Namespace(foo=3)',
         'string': 'abc'}
+
     """
     for k in params:
         # convert relevant np scalars to python types first (instead of str)
@@ -122,6 +130,23 @@ def _sanitize_params(params: Dict[str, Any]) -> Dict[str, Any]:
         elif type(params[k]) not in [bool, int, float, str, Tensor]:
             params[k] = str(params[k])
     return params
+
+
+def _convert_json_serializable(params: Dict[str, Any]) -> Dict[str, Any]:
+    """Convert non-serializable objects in params to string."""
+    return {k: str(v) if not _is_json_serializable(v) else v for k, v in params.items()}
+
+
+def _is_json_serializable(value: Any) -> bool:
+    """Test whether a variable can be encoded as json."""
+    if value is None or isinstance(value, (bool, int, float, str, list, dict)):  # fast path
+        return True
+    try:
+        json.dumps(value)
+        return True
+    except (TypeError, OverflowError):
+        # OverflowError is raised if number is too large to encode
+        return False
 
 
 def _add_prefix(
@@ -136,6 +161,7 @@ def _add_prefix(
 
     Returns:
         Dictionary with prefix and separator inserted before each key
+
     """
     if not prefix:
         return metrics

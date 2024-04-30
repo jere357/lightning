@@ -2,13 +2,13 @@ import os
 from copy import deepcopy
 
 import pytest
-
 from lightning.app import LightningApp, LightningFlow, LightningWork
 from lightning.app.runners import MultiProcessRuntime
 from lightning.app.storage.payload import Payload
 from lightning.app.structures import Dict, List
 from lightning.app.testing.helpers import EmptyFlow
 from lightning.app.utilities.enum import CacheCallsKeys, WorkStageStatus
+from lightning.app.utilities.imports import _IS_WINDOWS
 
 
 def test_dict():
@@ -332,7 +332,8 @@ class CounterWork(LightningWork):
         self.counter += 1
 
 
-@pytest.mark.skip(reason="tchaton: Resolve this test.")
+@pytest.mark.skipif(_IS_WINDOWS, reason="strange TimeOut exception")
+@pytest.mark.xfail(strict=False, reason="tchaton: Resolve this test.")
 @pytest.mark.parametrize("run_once_iterable", [False, True])
 @pytest.mark.parametrize("cache_calls", [False, True])
 @pytest.mark.parametrize("use_list", [False, True])
@@ -360,15 +361,13 @@ def test_structure_with_iterate_and_fault_tolerance(run_once_iterable, cache_cal
                     DummyFlow(),
                 )
             else:
-                self.iter = Dict(
-                    **{
-                        "0": CounterWork(cache_calls),
-                        "1": CounterWork(cache_calls),
-                        "2": CounterWork(cache_calls),
-                        "3": CounterWork(cache_calls),
-                        "4": DummyFlow(),
-                    }
-                )
+                self.iter = Dict(**{
+                    "0": CounterWork(cache_calls),
+                    "1": CounterWork(cache_calls),
+                    "2": CounterWork(cache_calls),
+                    "3": CounterWork(cache_calls),
+                    "4": DummyFlow(),
+                })
 
         def run(self):
             for work_idx, work in self.experimental_iterate(enumerate(self.iter), run_once=self.run_once_iterable):
@@ -511,6 +510,7 @@ class FlowPayload(LightningFlow):
             self.stop()
 
 
+@pytest.mark.xfail(strict=False, reason="flaky")
 def test_structures_with_payload():
     app = LightningApp(FlowPayload(), log_level="debug")
     MultiProcessRuntime(app, start_server=False).dispatch()

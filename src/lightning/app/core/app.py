@@ -20,7 +20,7 @@ import threading
 import warnings
 from copy import deepcopy
 from time import time
-from typing import Dict, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
 
 from deepdiff import DeepDiff, Delta
 from lightning_utilities.core.apply_func import apply_to_collection
@@ -29,6 +29,7 @@ import lightning.app
 from lightning.app import _console
 from lightning.app.api.request_types import _APIRequest, _CommandRequest, _DeltaRequest
 from lightning.app.core.constants import (
+    BATCH_DELTA_COUNT,
     DEBUG_ENABLED,
     FLOW_DURATION_SAMPLES,
     FLOW_DURATION_THRESHOLD,
@@ -42,18 +43,16 @@ from lightning.app.storage import Drive, Path, Payload
 from lightning.app.storage.path import _storage_root_dir
 from lightning.app.utilities import frontend
 from lightning.app.utilities.app_helpers import (
+    Logger,
     _delta_to_app_state_delta,
-    _handle_is_headless,
-    _is_headless,
     _LightningAppRef,
     _should_dispatch_app,
-    Logger,
 )
 from lightning.app.utilities.app_status import AppStatus
 from lightning.app.utilities.commands.base import _process_requests
 from lightning.app.utilities.component import _convert_paths_after_init, _validate_root_flow
 from lightning.app.utilities.enum import AppStage, CacheCallsKeys
-from lightning.app.utilities.exceptions import CacheMissException, ExitAppException
+from lightning.app.utilities.exceptions import CacheMissException, ExitAppException, LightningFlowException
 from lightning.app.utilities.layout import _collect_layout
 from lightning.app.utilities.proxies import ComponentDelta
 from lightning.app.utilities.scheduler import SchedulerThread
@@ -81,8 +80,8 @@ class LightningApp:
     ) -> None:
         """The Lightning App, or App in short runs a tree of one or more components that interact to create end-to-end
         applications. There are two kinds of components: :class:`~lightning.app.core.flow.LightningFlow` and
-        :class:`~lightning.app.core.work.LightningWork`. This modular design enables you to reuse components
-        created by other users.
+        :class:`~lightning.app.core.work.LightningWork`. This modular design enables you to reuse components created by
+        other users.
 
         The Lightning App alternatively run an event loop triggered by delta changes sent from
         either :class:`~lightning.app.core.work.LightningWork` or from the Lightning UI.
@@ -101,6 +100,7 @@ class LightningApp:
                 For instance, if you want to run your app at `https://customdomain.com/myapp`,
                 set `root_path` to `/myapp`.
                 You can learn more about proxy `here <https://www.fortinet.com/resources/cyberglossary/proxy-server>`_.
+
         """
 
         self.root_path = root_path  # when running behind a proxy
@@ -309,6 +309,14 @@ class LightningApp:
         except queue.Empty:
             return None
 
+    @staticmethod
+    def batch_get_state_changed_from_queue(q: BaseQueue, timeout: Optional[float] = None) -> List[dict]:
+        try:
+            timeout = timeout or q.default_timeout
+            return q.batch_get(timeout=timeout, count=BATCH_DELTA_COUNT)
+        except queue.Empty:
+            return []
+
     def check_error_queue(self) -> None:
         exception: Exception = self.get_state_changed_from_queue(self.error_queue)  # type: ignore[assignment,arg-type]
         if isinstance(exception, Exception):
@@ -342,12 +350,15 @@ class LightningApp:
 
         while (time() - t0) < self.state_accumulate_wait:
             # TODO: Fetch all available deltas at once to reduce queue calls.
-            delta: Optional[
-                Union[_DeltaRequest, _APIRequest, _CommandRequest, ComponentDelta]
-            ] = self.get_state_changed_from_queue(
-                self.delta_queue  # type: ignore[assignment,arg-type]
+            received_deltas: List[Union[_DeltaRequest, _APIRequest, _CommandRequest, ComponentDelta]] = (
+                self.batch_get_state_changed_from_queue(
+                    self.delta_queue  # type: ignore[assignment,arg-type]
+                )
             )
-            if delta:
+            if len(received_deltas) == []:
+                break
+
+            for delta in received_deltas:
                 if isinstance(delta, _DeltaRequest):
                     deltas.append(delta.delta)
                 elif isinstance(delta, ComponentDelta):
@@ -360,13 +371,13 @@ class LightningApp:
 
                     if work:
                         delta = _delta_to_app_state_delta(
-                            self.root, work, deepcopy(delta.delta)  # type: ignore[arg-type]
+                            self.root,  # type: ignore[arg-type]
+                            work,
+                            deepcopy(delta.delta),
                         )
                         deltas.append(delta)
                 else:
                     api_or_command_request_deltas.append(delta)
-            else:
-                break
 
         if api_or_command_request_deltas:
             _process_requests(self, api_or_command_request_deltas)
@@ -383,8 +394,7 @@ class LightningApp:
         return deltas
 
     def maybe_apply_changes(self) -> Optional[bool]:
-        """Get the deltas from both the flow queue and the work queue, merge the two deltas and update the
-        state."""
+        """Get the deltas from both the flow queue and the work queue, merge the two deltas and update the state."""
         self._send_flow_to_work_deltas(self.state)
 
         if not self.collect_changes:
@@ -438,7 +448,6 @@ class LightningApp:
             self.backend.update_work_statuses(self.works)
 
         self._update_layout()
-        self._update_is_headless()
         self._update_status()
         self.maybe_apply_changes()
 
@@ -465,6 +474,9 @@ class LightningApp:
                 self.root.run()
         except CacheMissException:
             self._on_cache_miss_exception()
+        except LightningFlowException:
+            done = True
+            self.stage = AppStage.FAILED
         except (ExitAppException, KeyboardInterrupt):
             done = True
             self.stage = AppStage.STOPPING
@@ -503,6 +515,7 @@ class LightningApp:
         """Entry point of the LightningApp.
 
         This would be dispatched by the Runtime objects.
+
         """
         self._original_state = deepcopy(self.state)
         done = False
@@ -537,13 +550,6 @@ class LightningApp:
         for component in breadth_first(self.root, types=(lightning.app.LightningFlow,)):  # type: ignore[arg-type]
             layout = _collect_layout(self, component)
             component._layout = layout
-
-    def _update_is_headless(self) -> None:
-        self.is_headless = _is_headless(self)
-
-        # If `is_headless` changed, handle it.
-        # This ensures support for apps which dynamically add a UI at runtime.
-        _handle_is_headless(self)
 
     def _update_status(self) -> None:
         old_status = self.status

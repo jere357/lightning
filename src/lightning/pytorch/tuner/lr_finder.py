@@ -16,18 +16,19 @@ import logging
 import os
 import uuid
 from copy import deepcopy
-from typing import Any, cast, Dict, List, Optional, TYPE_CHECKING, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
 import torch
 from lightning_utilities.core.imports import RequirementCache
+from torch.optim.lr_scheduler import LRScheduler
+from typing_extensions import override
 
 import lightning.pytorch as pl
-from lightning.fabric.utilities.types import _TORCH_LRSCHEDULER
 from lightning.pytorch.callbacks import Callback
 from lightning.pytorch.utilities.exceptions import MisconfigurationException
 from lightning.pytorch.utilities.parsing import lightning_hasattr, lightning_setattr
 from lightning.pytorch.utilities.rank_zero import rank_zero_warn
-from lightning.pytorch.utilities.types import LRScheduler, LRSchedulerConfig, STEP_OUTPUT
+from lightning.pytorch.utilities.types import STEP_OUTPUT, LRSchedulerConfig
 
 # check if ipywidgets is installed before importing tqdm.auto
 # to ensure it won't fail and a progress bar is displayed
@@ -36,10 +37,11 @@ if importlib.util.find_spec("ipywidgets") is not None:
 else:
     from tqdm import tqdm
 
-_MATPLOTLIB_AVAILABLE = RequirementCache("matplotlib")
-if TYPE_CHECKING and _MATPLOTLIB_AVAILABLE:
+if TYPE_CHECKING:
     import matplotlib.pyplot as plt
     from matplotlib.axes import Axes
+
+_MATPLOTLIB_AVAILABLE = RequirementCache("matplotlib")
 log = logging.getLogger(__name__)
 
 
@@ -88,6 +90,7 @@ class _LRFinder:
 
         # Get suggestion
         lr = lr_finder.suggestion()
+
     """
 
     def __init__(self, mode: str, lr_min: float, lr_max: float, num_training: int) -> None:
@@ -124,7 +127,6 @@ class _LRFinder:
 
         args = (optimizer, self.lr_max, self.num_training)
         scheduler = _LinearLR(*args) if self.mode == "linear" else _ExponentialLR(*args)
-        scheduler = cast(LRScheduler, scheduler)
 
         trainer.strategy.optimizers = [optimizer]
         trainer.strategy.lr_scheduler_configs = [LRSchedulerConfig(scheduler, interval="step")]
@@ -152,7 +154,7 @@ class _LRFinder:
         if ax is None:
             fig, ax = plt.subplots()
         else:
-            fig = ax.figure
+            fig = ax.figure  # type: ignore[assignment]
 
         # Plot loss as a function of the learning rate
         ax.plot(lrs, losses)
@@ -172,8 +174,8 @@ class _LRFinder:
         return fig
 
     def suggestion(self, skip_begin: int = 10, skip_end: int = 1) -> Optional[float]:
-        """This will propose a suggestion for an initial learning rate based on the point with the steepest
-        negative gradient.
+        """This will propose a suggestion for an initial learning rate based on the point with the steepest negative
+        gradient.
 
         Args:
             skip_begin: how many samples to skip in the beginning; helps to avoid too naive estimates
@@ -182,6 +184,7 @@ class _LRFinder:
         Returns:
             The suggested initial learning rate to use, or `None` if a suggestion is not possible due to too few
             loss samples.
+
         """
         losses = torch.tensor(self.results["loss"][skip_begin:-skip_end])
         losses = losses[torch.isfinite(losses)]
@@ -215,8 +218,8 @@ def _lr_find(
     update_attr: bool = False,
     attr_name: str = "",
 ) -> Optional[_LRFinder]:
-    """Enables the user to do a range test of good initial learning rates, to reduce the amount of guesswork in
-    picking a good starting learning rate.
+    """Enables the user to do a range test of good initial learning rates, to reduce the amount of guesswork in picking
+    a good starting learning rate.
 
     Args:
         trainer: A Trainer instance.
@@ -235,6 +238,7 @@ def _lr_find(
         update_attr: Whether to update the learning rate attribute or not.
         attr_name: Name of the attribute which stores the learning rate. The names 'learning_rate' or 'lr' get
             automatically detected. Otherwise, set the name here.
+
     """
     if trainer.fast_dev_run:
         rank_zero_warn("Skipping learning rate finder since `fast_dev_run` is enabled.")
@@ -342,8 +346,8 @@ def __lr_finder_restore_params(trainer: "pl.Trainer", params: Dict[str, Any]) ->
 
 
 class _LRCallback(Callback):
-    """Special callback used by the learning rate finder. This callback logs the learning rate before each batch
-    and logs the corresponding loss after each batch.
+    """Special callback used by the learning rate finder. This callback logs the learning rate before each batch and
+    logs the corresponding loss after each batch.
 
     Args:
         num_training: number of iterations done by the learning rate finder
@@ -355,6 +359,7 @@ class _LRCallback(Callback):
         beta: smoothing value, the loss being logged is a running average of
             loss values logged until now. ``beta`` controls the forget rate i.e.
             if ``beta=0`` all past information is ignored.
+
     """
 
     def __init__(
@@ -374,6 +379,7 @@ class _LRCallback(Callback):
         self.progress_bar_refresh_rate = progress_bar_refresh_rate
         self.progress_bar = None
 
+    @override
     def on_train_batch_start(
         self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", batch: Any, batch_idx: int
     ) -> None:
@@ -386,11 +392,19 @@ class _LRCallback(Callback):
 
         self.lrs.append(trainer.lr_scheduler_configs[0].scheduler.lr[0])  # type: ignore[union-attr]
 
+    @override
     def on_train_batch_end(
         self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", outputs: STEP_OUTPUT, batch: Any, batch_idx: int
     ) -> None:
         """Called when the training batch ends, logs the calculated loss."""
         if (trainer.fit_loop.batch_idx + 1) % trainer.accumulate_grad_batches != 0:
+            return
+
+        # _AutomaticOptimization.run turns None STEP_OUTPUT into an empty dict
+        if not outputs:
+            # need to add an element, because we also added one element to lrs in on_train_batch_start
+            # so add nan, because they are not considered when computing the suggestion
+            self.losses.append(float("nan"))
             return
 
         if self.progress_bar:
@@ -424,7 +438,7 @@ class _LRCallback(Callback):
         self.losses.append(smoothed_loss)
 
 
-class _LinearLR(_TORCH_LRSCHEDULER):
+class _LinearLR(LRScheduler):
     """Linearly increases the learning rate between two boundaries over a number of iterations.
 
     Args:
@@ -436,6 +450,7 @@ class _LinearLR(_TORCH_LRSCHEDULER):
         num_iter: the number of iterations over which the test occurs.
 
         last_epoch: the index of last epoch. Default: -1.
+
     """
 
     def __init__(self, optimizer: torch.optim.Optimizer, end_lr: float, num_iter: int, last_epoch: int = -1):
@@ -443,7 +458,8 @@ class _LinearLR(_TORCH_LRSCHEDULER):
         self.num_iter = num_iter
         super().__init__(optimizer, last_epoch)
 
-    def get_lr(self) -> List[float]:
+    @override
+    def get_lr(self) -> List[float]:  # type: ignore[override]
         curr_iter = self.last_epoch + 1
         r = curr_iter / self.num_iter
 
@@ -459,7 +475,7 @@ class _LinearLR(_TORCH_LRSCHEDULER):
         return self._lr
 
 
-class _ExponentialLR(_TORCH_LRSCHEDULER):
+class _ExponentialLR(LRScheduler):
     """Exponentially increases the learning rate between two boundaries over a number of iterations.
 
     Arguments:
@@ -471,6 +487,7 @@ class _ExponentialLR(_TORCH_LRSCHEDULER):
         num_iter: the number of iterations over which the test occurs.
 
         last_epoch: the index of last epoch. Default: -1.
+
     """
 
     def __init__(self, optimizer: torch.optim.Optimizer, end_lr: float, num_iter: int, last_epoch: int = -1):
@@ -478,7 +495,8 @@ class _ExponentialLR(_TORCH_LRSCHEDULER):
         self.num_iter = num_iter
         super().__init__(optimizer, last_epoch)
 
-    def get_lr(self) -> List[float]:
+    @override
+    def get_lr(self) -> List[float]:  # type: ignore[override]
         curr_iter = self.last_epoch + 1
         r = curr_iter / self.num_iter
 

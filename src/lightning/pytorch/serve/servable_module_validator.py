@@ -7,6 +7,7 @@ from typing import Any, Dict, Literal, Optional
 import requests
 import torch
 from lightning_utilities.core.imports import RequirementCache
+from typing_extensions import override
 
 import lightning.pytorch as pl
 from lightning.pytorch.callbacks import Callback
@@ -36,6 +37,7 @@ class ServableModuleValidator(Callback):
         port: The port associated with the server.
         timeout: Timeout period in seconds, that the process should wait for the server to start.
         exit_on_failure: Whether to exit the process on failure.
+
     """
 
     def __init__(
@@ -70,6 +72,7 @@ class ServableModuleValidator(Callback):
         self.exit_on_failure = exit_on_failure
         self.resp: Optional[requests.Response] = None
 
+    @override
     @rank_zero_only
     def on_train_start(self, trainer: "pl.Trainer", servable_module: "pl.LightningModule") -> None:
         if isinstance(trainer.strategy, _NOT_SUPPORTED_STRATEGIES):
@@ -132,6 +135,7 @@ class ServableModuleValidator(Callback):
         """Returns whether the model was successfully served."""
         return self.resp.status_code == 200 if self.resp else None
 
+    @override
     def state_dict(self) -> Dict[str, Any]:
         return {"successful": self.successful, "optimization": self.optimization, "server": self.server}
 

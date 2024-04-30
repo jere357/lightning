@@ -3,7 +3,6 @@ from unittest import mock
 
 import pytest
 import requests
-
 from lightning.app.utilities import login
 
 LIGHTNING_CLOUD_URL = os.getenv("LIGHTNING_CLOUD_URL", "https://lightning.ai")
@@ -151,7 +150,5 @@ def test_network_failure(
 def test_with_api_key_only():
     auth = login.Auth()
     auth.save(user_id="7c8455e3-7c5f-4697-8a6d-105971d6b9bd", api_key="e63fae57-2b50-498b-bc46-d6204cbf330e")
-    assert (
-        auth.authenticate()
-        == "Basic N2M4NDU1ZTMtN2M1Zi00Njk3LThhNmQtMTA1OTcxZDZiOWJkOmU2M2ZhZTU3LTJiNTAtNDk4Yi1iYzQ2LWQ2MjA0Y2JmMzMwZQ=="  # noqa E501
-    )
+    hash_ = "N2M4NDU1ZTMtN2M1Zi00Njk3LThhNmQtMTA1OTcxZDZiOWJkOmU2M2ZhZTU3LTJiNTAtNDk4Yi1iYzQ2LWQ2MjA0Y2JmMzMwZQ"
+    assert auth.authenticate() == f"Basic {hash_}=="  # E501

@@ -21,15 +21,22 @@ from pathlib import Path
 from typing import List
 from unittest.mock import Mock
 
-import pytest
-import torch.distributed
-
 import lightning.fabric
 import lightning.pytorch
+import pytest
+import torch.distributed
 from lightning.fabric.plugins.environments.lightning import find_free_network_port
-from lightning.fabric.utilities.imports import _IS_WINDOWS, _TORCH_GREATER_EQUAL_1_12
+from lightning.fabric.strategies.launchers.subprocess_script import _ChildProcessObserver
+from lightning.fabric.utilities.distributed import _distributed_is_initialized
+from lightning.fabric.utilities.imports import _IS_WINDOWS
+from lightning.pytorch.accelerators import XLAAccelerator
 from lightning.pytorch.trainer.connectors.signal_connector import _SignalConnector
+from tqdm import TMonitor
+
 from tests_pytorch import _PATH_DATASETS
+
+if sys.version_info >= (3, 9):
+    from concurrent.futures.process import _ExecutorManagerThread
 
 
 @pytest.fixture(scope="session")
@@ -40,12 +47,16 @@ def datadir():
 @pytest.fixture(autouse=True)
 def preserve_global_rank_variable():
     """Ensures that the rank_zero_only.rank global variable gets reset in each test."""
-    from lightning.pytorch.utilities.rank_zero import rank_zero_only
+    from lightning.fabric.utilities.rank_zero import rank_zero_only as rank_zero_only_fabric
+    from lightning.pytorch.utilities.rank_zero import rank_zero_only as rank_zero_only_pytorch
+    from lightning_utilities.core.rank_zero import rank_zero_only as rank_zero_only_utilities
 
-    rank = getattr(rank_zero_only, "rank", None)
+    functions = (rank_zero_only_pytorch, rank_zero_only_fabric, rank_zero_only_utilities)
+    ranks = [getattr(fn, "rank", None) for fn in functions]
     yield
-    if rank is not None:
-        setattr(rank_zero_only, "rank", rank)
+    for fn, rank in zip(functions, ranks):
+        if rank is not None:
+            setattr(fn, "rank", rank)
 
 
 @pytest.fixture(autouse=True)
@@ -72,12 +83,13 @@ def restore_env_variables():
         "WANDB_REQUIRE_SERVICE",
         "WANDB_SERVICE",
         "RANK",  # set by DeepSpeed
-        "POPLAR_ENGINE_OPTIONS",  # set by IPUStrategy
-        "CUDA_MODULE_LOADING",  # leaked since PyTorch 1.13
-        "KMP_INIT_AT_FORK",  # leaked since PyTorch 1.13
-        "KMP_DUPLICATE_LIB_OK",  # leaked since PyTorch 1.13
+        "CUDA_MODULE_LOADING",  # leaked by PyTorch
+        "KMP_INIT_AT_FORK",  # leaked by PyTorch
+        "KMP_DUPLICATE_LIB_OK",  # leaked by PyTorch
         "CRC32C_SW_MODE",  # leaked by tensorboardX
         "TRITON_CACHE_DIR",  # leaked by torch.compile
+        "_TORCHINDUCTOR_PYOBJECT_TENSOR_DATA_PTR",  # leaked by torch.compile
+        "OMP_NUM_THREADS",  # set by our launchers
         # leaked by XLA
         "ALLOW_MULTIPLE_LIBTPU_LOAD",
         "GRPC_VERBOSITY",
@@ -94,6 +106,7 @@ def restore_signal_handlers():
     """Ensures that signal handlers get restored before the next test runs.
 
     This is a safety net for tests that don't run Trainer's teardown.
+
     """
     valid_signals = _SignalConnector._valid_signals()
     if not _IS_WINDOWS:
@@ -110,7 +123,7 @@ def restore_signal_handlers():
 def teardown_process_group():
     """Ensures that the distributed process group gets closed before the next test runs."""
     yield
-    if torch.distributed.is_available() and torch.distributed.is_initialized():
+    if _distributed_is_initialized():
         torch.distributed.destroy_process_group()
 
 
@@ -119,6 +132,43 @@ def reset_deterministic_algorithm():
     """Ensures that torch determinism settings are reset before the next test runs."""
     yield
     torch.use_deterministic_algorithms(False)
+
+
+@pytest.fixture(autouse=True)
+def thread_police_duuu_daaa_duuu_daaa():
+    """Attempts to stop left-over threads to avoid test interactions."""
+    active_threads_before = set(threading.enumerate())
+    yield
+    active_threads_after = set(threading.enumerate())
+
+    if XLAAccelerator.is_available():
+        # Ignore the check when running XLA tests for now
+        return
+
+    for thread in active_threads_after - active_threads_before:
+        stop = getattr(thread, "stop", None) or getattr(thread, "exit", None)
+        if thread.daemon and callable(stop):
+            # A daemon thread would anyway be stopped at the end of a program
+            # We do it preemptively here to reduce the risk of interactions with other tests that run after
+            stop()
+            assert not thread.is_alive()
+        elif isinstance(thread, _ChildProcessObserver):
+            thread.join(timeout=10)
+        elif thread.name == "QueueFeederThread":  # tensorboardX
+            thread.join(timeout=20)
+        elif isinstance(thread, TMonitor):
+            thread.exit()
+        elif (
+            sys.version_info >= (3, 9)
+            and isinstance(thread, _ExecutorManagerThread)
+            or "ThreadPoolExecutor-" in thread.name
+        ):
+            # probably `torch.compile`, can't narrow it down further
+            continue
+        elif thread.name == "fsspecIO":
+            continue
+        else:
+            raise AssertionError(f"Test left zombie thread: {thread}")
 
 
 def mock_cuda_count(monkeypatch, n: int) -> None:
@@ -147,15 +197,7 @@ def cuda_count_4(monkeypatch):
 
 
 def mock_mps_count(monkeypatch, n: int) -> None:
-    if n > 0 and not _TORCH_GREATER_EQUAL_1_12:
-
-        class MpsDeviceMock:
-            def __new__(cls, self, *args, **kwargs):
-                return "mps"
-
-        # torch doesn't allow creation of mps devices on older versions
-        monkeypatch.setattr("torch.device", MpsDeviceMock)
-    monkeypatch.setattr(lightning.fabric.accelerators.mps, "_get_all_available_mps_gpus", lambda: list(range(n)))
+    monkeypatch.setattr(lightning.fabric.accelerators.mps, "_get_all_available_mps_gpus", lambda: [0] if n > 0 else [])
     monkeypatch.setattr(lightning.fabric.accelerators.mps.MPSAccelerator, "is_available", lambda *_: n > 0)
 
 
@@ -169,16 +211,6 @@ def mps_count_1(monkeypatch):
     mock_mps_count(monkeypatch, 1)
 
 
-@pytest.fixture()
-def mps_count_2(monkeypatch):
-    mock_mps_count(monkeypatch, 2)
-
-
-@pytest.fixture()
-def mps_count_4(monkeypatch):
-    mock_mps_count(monkeypatch, 4)
-
-
 def mock_xla_available(monkeypatch: pytest.MonkeyPatch, value: bool = True) -> None:
     monkeypatch.setattr(lightning.pytorch.strategies.xla, "_XLA_AVAILABLE", value)
     monkeypatch.setattr(lightning.pytorch.strategies.single_xla, "_XLA_AVAILABLE", value)
@@ -187,7 +219,6 @@ def mock_xla_available(monkeypatch: pytest.MonkeyPatch, value: bool = True) -> N
     monkeypatch.setattr(lightning.fabric.accelerators.xla, "_XLA_AVAILABLE", value)
     monkeypatch.setattr(lightning.fabric.plugins.environments.xla, "_XLA_AVAILABLE", value)
     monkeypatch.setattr(lightning.fabric.plugins.io.xla, "_XLA_AVAILABLE", value)
-    monkeypatch.setattr(lightning.fabric.strategies.xla, "_XLA_AVAILABLE", value)
     monkeypatch.setattr(lightning.fabric.strategies.launchers.xla, "_XLA_AVAILABLE", value)
 
 
@@ -217,6 +248,7 @@ def caplog(caplog):
     """Workaround for https://github.com/pytest-dev/pytest/issues/3697.
 
     Setting ``filterwarnings`` with pytest breaks ``caplog`` when ``not logger.propagate``.
+
     """
     import logging
 
@@ -240,8 +272,8 @@ def caplog(caplog):
 
 
 @pytest.fixture()
-def tmpdir_server(tmpdir):
-    Handler = partial(SimpleHTTPRequestHandler, directory=str(tmpdir))
+def tmpdir_server(tmp_path):
+    Handler = partial(SimpleHTTPRequestHandler, directory=str(tmp_path))
     from http.server import ThreadingHTTPServer
 
     with ThreadingHTTPServer(("localhost", 0), Handler) as server:
@@ -258,8 +290,9 @@ def single_process_pg():
     """Initialize the default process group with only the current process for testing purposes.
 
     The process group is destroyed when the with block is exited.
+
     """
-    if torch.distributed.is_initialized():
+    if _distributed_is_initialized():
         raise RuntimeError("Can't use `single_process_pg` when the default process group is already initialized.")
 
     orig_environ = os.environ.copy()
@@ -274,6 +307,17 @@ def single_process_pg():
         torch.distributed.destroy_process_group()
         os.environ.clear()
         os.environ.update(orig_environ)
+
+
+@pytest.fixture(autouse=True)
+def leave_no_artifacts_behind():
+    tests_root = Path(__file__).parent.parent
+    files_before = {p for p in tests_root.rglob("*") if "__pycache__" not in p.parts}
+    yield
+    files_after = {p for p in tests_root.rglob("*") if "__pycache__" not in p.parts}
+    difference = files_after - files_before
+    difference = {str(f.relative_to(tests_root)) for f in difference}
+    assert not difference, f"Test left artifacts behind: {difference}"
 
 
 def pytest_collection_modifyitems(items: List[pytest.Function], config: pytest.Config) -> None:
@@ -293,22 +337,23 @@ def pytest_collection_modifyitems(items: List[pytest.Function], config: pytest.C
 
     for kwarg, env_var in options.items():
         # this will compute the intersection of all tests selected per environment variable
-        if os.getenv(env_var, "0") == "1":
-            conditions.append(env_var)
-            for i, test in reversed(list(enumerate(items))):  # loop in reverse, since we are going to pop items
-                already_skipped = any(marker.name == "skip" for marker in test.own_markers)
-                if already_skipped:
-                    # the test was going to be skipped anyway, filter it out
-                    items.pop(i)
-                    skipped += 1
-                    continue
-                has_runif_with_kwarg = any(
-                    marker.name == "skipif" and marker.kwargs.get(kwarg) for marker in test.own_markers
-                )
-                if not has_runif_with_kwarg:
-                    # the test has `@RunIf(kwarg=True)`, filter it out
-                    items.pop(i)
-                    filtered += 1
+        if os.getenv(env_var, "0") != "1":
+            continue
+        conditions.append(env_var)
+        for i, test in reversed(list(enumerate(items))):  # loop in reverse, since we are going to pop items
+            already_skipped = any(marker.name == "skip" for marker in test.own_markers)
+            if already_skipped:
+                # the test was going to be skipped anyway, filter it out
+                items.pop(i)
+                skipped += 1
+                continue
+            has_runif_with_kwarg = any(
+                marker.name == "skipif" and marker.kwargs.get(kwarg) for marker in test.own_markers
+            )
+            if not has_runif_with_kwarg:
+                # the test has `@RunIf(kwarg=True)`, filter it out
+                items.pop(i)
+                filtered += 1
 
     if config.option.verbose >= 0 and (filtered or skipped):
         writer = config.get_terminal_writer()

@@ -29,7 +29,7 @@ from fastapi import FastAPI, Query, Request
 from starlette.background import BackgroundTask
 from starlette.responses import RedirectResponse
 
-from lightning.app.core.constants import get_lightning_cloud_url, LIGHTNING_CREDENTIAL_PATH
+from lightning.app.core.constants import LIGHTNING_CREDENTIAL_PATH, get_lightning_cloud_url
 from lightning.app.utilities.app_helpers import Logger
 from lightning.app.utilities.network import find_free_network_port
 
@@ -60,6 +60,7 @@ class Auth:
         Returns
         ----------
         True if credentials are available.
+
         """
         if not self.secrets_file.exists():
             logger.debug("Credentials file not found.")
@@ -71,7 +72,7 @@ class Auth:
             return True
 
     def save(self, token: str = "", user_id: str = "", api_key: str = "", username: str = "") -> None:
-        """save credentials to disk."""
+        """Save credentials to disk."""
         self.secrets_file.parent.mkdir(exist_ok=True, parents=True)
         with self.secrets_file.open("w") as f:
             json.dump(
@@ -98,7 +99,7 @@ class Auth:
 
     @property
     def auth_header(self) -> Optional[str]:
-        """authentication header used by lightning-cloud client."""
+        """Authentication header used by lightning-cloud client."""
         if self.api_key:
             token = f"{self.user_id}:{self.api_key}"
             return f"Basic {base64.b64encode(token.encode('ascii')).decode('ascii')}"  # E501
@@ -108,7 +109,7 @@ class Auth:
         )
 
     def _run_server(self) -> None:
-        """start a server to complete authentication."""
+        """Start a server to complete authentication."""
         AuthServer().login_with_browser(self)
 
     def authenticate(self) -> Optional[str]:
@@ -117,6 +118,7 @@ class Auth:
         Returns
         ----------
         authorization header to use when authentication completes.
+
         """
         if not self.load():
             # First try to authenticate from env
@@ -142,7 +144,7 @@ class Auth:
 
         raise ValueError(
             "We couldn't find any credentials linked to your account. "
-            "Please try logging in using the CLI command `lightning login`"
+            "Please try logging in using the CLI command `lightning_app login`"
         )
 
 
@@ -187,7 +189,7 @@ class AuthServer:
 
             if not token:
                 logger.warn(
-                    "Login Failed. This is most likely because you're using an older version of the CLI. \n"  # noqa E501
+                    "Login Failed. This is most likely because you're using an older version of the CLI. \n"  # E501
                     "Please try to update the CLI or open an issue with this information \n"  # E501
                     f"expected token in {request.query_params.items()}"
                 )

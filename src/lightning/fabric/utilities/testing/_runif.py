@@ -57,6 +57,7 @@ def _runif_reasons(
             This requires that the ``PL_RUN_STANDALONE_TESTS=1`` environment variable is set.
         deepspeed: Require that microsoft/DeepSpeed is installed.
         dynamo: Require that `torch.dynamo` is supported.
+
     """
     reasons = []
     kwargs = {}  # used in conftest.py::pytest_collection_modifyitems
@@ -121,8 +122,6 @@ def _runif_reasons(
             cond = not is_dynamo_supported()
         else:
             cond = sys.platform == "win32" or sys.version_info >= (3, 11)
-        # set use_base_version for nightly support
-        cond |= compare_version("torch", operator.lt, "2.0.0", use_base_version=True)
         if cond:
             reasons.append("torch.dynamo")
 

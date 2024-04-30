@@ -9,8 +9,8 @@ from unittest import mock
 import pytest
 from fastapi import status
 from fastapi.testclient import TestClient
-
 from lightning.app.plugin.plugin import _Run, _start_plugin_server
+from lightning_cloud.openapi import Externalv1LightningappInstance
 
 
 @pytest.fixture()
@@ -24,7 +24,7 @@ def mock_plugin_server(mock_uvicorn) -> TestClient:
 
     mock_uvicorn.run.side_effect = create_test_client
 
-    _start_plugin_server("0.0.0.0", 8888)  # noqa: S104
+    _start_plugin_server(8888)
 
     return test_client["client"]
 
@@ -38,8 +38,8 @@ class _MockResponse:
 
 
 def mock_requests_get(valid_url, return_value):
-    """Used to replace `requests.get` with a function that returns the given value for the given valid URL and
-    raises otherwise."""
+    """Used to replace `requests.get` with a function that returns the given value for the given valid URL and raises
+    otherwise."""
 
     def inner(url):
         if url == valid_url:
@@ -85,6 +85,7 @@ plugin = TestPlugin()
                 cluster_id="any",
                 plugin_arguments={},
                 source_app="any",
+                keep_machines_after_stop=False,
             ),
             "Error downloading plugin source:",
             None,
@@ -99,6 +100,7 @@ plugin = TestPlugin()
                 cluster_id="any",
                 plugin_arguments={},
                 source_app="any",
+                keep_machines_after_stop=False,
             ),
             "Error extracting plugin source:",
             None,
@@ -113,6 +115,7 @@ plugin = TestPlugin()
                 cluster_id="any",
                 plugin_arguments={},
                 source_app="any",
+                keep_machines_after_stop=False,
             ),
             "Error loading plugin:",
             "plugin.py",
@@ -127,6 +130,7 @@ plugin = TestPlugin()
                 cluster_id="any",
                 plugin_arguments={},
                 source_app="any",
+                keep_machines_after_stop=False,
             ),
             "Error running plugin:",
             "plugin.py",
@@ -147,57 +151,24 @@ def test_run_errors(mock_requests, mock_plugin_server, body, message, tar_file_n
     assert message in response.text
 
 
-_plugin_with_job_run_no_actions = """
+_plugin_with_job_run = """
 from lightning.app.plugin.plugin import LightningPlugin
 
 class TestPlugin(LightningPlugin):
     def run(self, name, entrypoint):
-        self.run_job(name, entrypoint)
-
-plugin = TestPlugin()
-"""
-
-
-_plugin_with_job_run_toast = """
-from lightning.app.plugin.actions import Toast
-from lightning.app.plugin.plugin import LightningPlugin
-
-class TestPlugin(LightningPlugin):
-    def run(self, name, entrypoint):
-        self.run_job(name, entrypoint)
-        return [Toast("info", "testing")]
-
-plugin = TestPlugin()
-"""
-
-_plugin_with_job_run_navigate = """
-from lightning.app.plugin.actions import NavigateTo
-from lightning.app.plugin.plugin import LightningPlugin
-
-class TestPlugin(LightningPlugin):
-    def run(self, name, entrypoint):
-        self.run_job(name, entrypoint)
-        return [NavigateTo("/testing")]
+        return self.run_job(name, entrypoint)
 
 plugin = TestPlugin()
 """
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="the plugin server is only intended to run on linux.")
-@pytest.mark.parametrize(
-    ("plugin_source", "actions"),
-    [
-        (_plugin_with_job_run_no_actions, []),
-        (_plugin_with_job_run_toast, [{"content": "info:testing", "type": "TOAST"}]),
-        (_plugin_with_job_run_navigate, [{"content": "/testing", "type": "NAVIGATE_TO"}]),
-    ],
-)
+@mock.patch("lightning.app.runners.backends.cloud.CloudBackend")
 @mock.patch("lightning.app.runners.cloud.CloudRuntime")
 @mock.patch("lightning.app.plugin.plugin.requests")
-def test_run_job(mock_requests, mock_cloud_runtime, mock_plugin_server, plugin_source, actions):
-    """Tests that running a job from a plugin calls the correct `CloudRuntime` methods with the correct
-    arguments."""
-    content = as_tar_bytes("plugin.py", plugin_source)
+def test_run_job(mock_requests, mock_cloud_runtime, mock_cloud_backend, mock_plugin_server):
+    """Tests that running a job from a plugin calls the correct `CloudRuntime` methods with the correct arguments."""
+    content = as_tar_bytes("plugin.py", _plugin_with_job_run)
     mock_requests.get.side_effect = mock_requests_get("http://test.tar.gz", content)
 
     body = _Run(
@@ -208,15 +179,19 @@ def test_run_job(mock_requests, mock_cloud_runtime, mock_plugin_server, plugin_s
         cluster_id="test_cluster_id",
         plugin_arguments={"name": "test_name", "entrypoint": "test_entrypoint"},
         source_app="test_source_app",
+        keep_machines_after_stop=True,
     )
 
     mock_app = mock.MagicMock()
     mock_cloud_runtime.load_app_from_file.return_value = mock_app
+    mock_cloud_runtime.return_value.cloudspace_dispatch.return_value = Externalv1LightningappInstance(
+        id="created_app_id"
+    )
 
     response = mock_plugin_server.post("/v1/runs", json=body.dict(exclude_none=True))
 
-    assert response.status_code == status.HTTP_200_OK
-    assert json.loads(response.text)["actions"] == actions
+    assert response.status_code == status.HTTP_200_OK, response.json()
+    assert json.loads(response.text)["id"] == "created_app_id"
 
     mock_cloud_runtime.load_app_from_file.assert_called_once()
     assert "test_entrypoint" in mock_cloud_runtime.load_app_from_file.call_args[0][0]
@@ -228,6 +203,7 @@ def test_run_job(mock_requests, mock_cloud_runtime, mock_plugin_server, plugin_s
         env_vars={},
         secrets={},
         run_app_comment_commands=True,
+        backend=mock.ANY,
     )
 
     mock_cloud_runtime().cloudspace_dispatch.assert_called_once_with(
@@ -236,6 +212,7 @@ def test_run_job(mock_requests, mock_cloud_runtime, mock_plugin_server, plugin_s
         name="test_name",
         cluster_id=body.cluster_id,
         source_app=body.source_app,
+        keep_machines_after_stop=body.keep_machines_after_stop,
     )
 
 

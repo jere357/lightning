@@ -2,6 +2,13 @@
 Glossary
 ########
 
+.. toctree::
+   :maxdepth: 1
+   :hidden:
+
+   Checkpoint <../guide/checkpoint/index>
+   Weights and Biases <../guide/loggers/wandb>
+
 
 .. raw:: html
 
@@ -29,6 +36,11 @@ Glossary
     :col_css: col-md-4
 
 .. displayitem::
+    :header: Bfloat16
+    :button_link: ../fundamentals/precision.html
+    :col_css: col-md-4
+
+.. displayitem::
     :header: Broadcast
     :button_link: ../advanced/distributed_communication.html
     :col_css: col-md-4
@@ -40,7 +52,7 @@ Glossary
 
 .. displayitem::
     :header: Checkpoint
-    :button_link: ../guide/checkpoint.html
+    :button_link: ../guide/checkpoint/index.html
     :col_css: col-md-4
 
 .. displayitem::
@@ -59,8 +71,18 @@ Glossary
     :col_css: col-md-4
 
 .. displayitem::
+    :header: Compile
+    :button_link: ../advanced/compile.html
+    :col_css: col-md-4
+
+.. displayitem::
     :header: CUDA
     :button_link: ../fundamentals/accelerators.html
+    :col_css: col-md-4
+
+.. displayitem::
+    :header: FSDP
+    :button_link: ../advanced/model_parallel/fsdp.html
     :col_css: col-md-4
 
 .. displayitem::
@@ -79,7 +101,12 @@ Glossary
     :col_css: col-md-4
 
 .. displayitem::
-    :header: Jypyter
+    :header: Initialization
+    :button_link: ../advanced/model_init.html
+    :col_css: col-md-4
+
+.. displayitem::
+    :header: Jupyter
     :button_link: ../launch/notebooks.html
     :col_css: col-md-4
 
@@ -139,6 +166,11 @@ Glossary
     :col_css: col-md-4
 
 .. displayitem::
+    :header: Quantization
+    :button_link: ../fundamentals/precision.html
+    :col_css: col-md-4
+
+.. displayitem::
     :header: Reduce
     :button_link: ../advanced/distributed_communication.html
     :col_css: col-md-4
@@ -171,6 +203,16 @@ Glossary
 .. displayitem::
     :header: Trainer
     :button_link: ../guide/trainer_template.html
+    :col_css: col-md-4
+
+.. displayitem::
+    :header: Weights and Biases
+    :button_link: ../guide/loggers/wandb.html
+    :col_css: col-md-4
+
+.. displayitem::
+    :header: 16-bit, 8-bit, 4-bit
+    :button_link: ../fundamentals/precision.html
     :col_css: col-md-4
 
 

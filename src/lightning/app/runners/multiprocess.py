@@ -39,6 +39,7 @@ class MultiProcessRuntime(Runtime):
 
     The MultiProcessRuntime will generate 1 process for each :class:`~lightning.app.core.work.LightningWork` and attach
     queues to enable communication between the different processes.
+
     """
 
     backend: Union[str, Backend] = "multiprocessing"
@@ -124,14 +125,12 @@ class MultiProcessRuntime(Runtime):
                 # wait for server to be ready
                 has_started_queue.get()
 
-            if all(
-                [
-                    open_ui,
-                    "PYTEST_CURRENT_TEST" not in os.environ,
-                    not _is_headless(self.app),
-                    constants.LIGHTNING_CLOUDSPACE_HOST is None,
-                ]
-            ):
+            if all([
+                open_ui,
+                "PYTEST_CURRENT_TEST" not in os.environ,
+                not _is_headless(self.app),
+                constants.LIGHTNING_CLOUDSPACE_HOST is None,
+            ]):
                 click.launch(self._get_app_url())
 
             # Connect the runtime to the application.

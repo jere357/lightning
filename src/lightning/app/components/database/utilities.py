@@ -19,15 +19,20 @@ from typing import Any, Dict, Generic, List, Type, TypeVar
 
 from fastapi import Response, status
 from fastapi.encoders import jsonable_encoder
+from lightning_utilities.core.imports import RequirementCache
 from pydantic import BaseModel, parse_obj_as
-from pydantic.main import ModelMetaclass
+
+if RequirementCache("pydantic>=2.0.0"):
+    from pydantic.v1.main import ModelMetaclass
+else:
+    from pydantic.main import ModelMetaclass
 
 from lightning.app.utilities.app_helpers import Logger
 from lightning.app.utilities.imports import _is_sqlmodel_available
 
 if _is_sqlmodel_available():
     from sqlalchemy.inspection import inspect as sqlalchemy_inspect
-    from sqlmodel import JSON, select, Session, SQLModel, TypeDecorator
+    from sqlmodel import JSON, Session, SQLModel, TypeDecorator, select
 
 logger = Logger(__name__)
 engine = None
@@ -47,6 +52,7 @@ def _pydantic_column_type(pydantic_type: Any) -> Any:
         class TrialConfig(SQLModel, table=False):
             ...
             params: Dict[str, Union[Dict[str, float]] = Field(sa_column=Column(pydantic_column_type[Dict[str, float]))
+
     """
 
     class PydanticJSONType(TypeDecorator, Generic[T]):
@@ -142,23 +148,19 @@ class _GeneralModel(BaseModel):
 
     @classmethod
     def from_obj(cls, obj, token):
-        return cls(
-            **{
-                "cls_name": obj.__class__.__name__,
-                "data": obj.json(),
-                "token": token,
-            }
-        )
+        return cls(**{
+            "cls_name": obj.__class__.__name__,
+            "data": obj.json(),
+            "token": token,
+        })
 
     @classmethod
     def from_cls(cls, obj_cls, token):
-        return cls(
-            **{
-                "cls_name": obj_cls.__name__,
-                "data": "",
-                "token": token,
-            }
-        )
+        return cls(**{
+            "cls_name": obj_cls.__name__,
+            "data": "",
+            "token": token,
+        })
 
 
 class _SelectAll:

@@ -19,7 +19,7 @@ from typing import Any, List, Optional, Tuple
 
 from packaging.version import Version
 
-from lightning.app import LightningFlow, LightningWork
+from lightning.app.core import LightningFlow, LightningWork
 from lightning.app.core.queues import BaseQueue
 from lightning.app.utilities.imports import (
     _CLOUD_TEST_RUN,
@@ -62,6 +62,7 @@ class _RunIf:
     @pytest.mark.parametrize("arg1", [1, 2.0])
     def test_wrapper(arg1):
         assert arg1 > 0.0
+
     """
 
     def __new__(
@@ -141,6 +142,11 @@ class _MockQueue(BaseQueue):
             raise Empty()
         return self._queue.pop(0)
 
+    def batch_get(self, timeout: int = 0, count: int = None):
+        if not self._queue:
+            raise Empty()
+        return [self._queue.pop(0)]
+
     def __contains__(self, item):
         return item in self._queue
 
@@ -155,6 +161,7 @@ class EmptyFlow(LightningFlow):
     """A LightningFlow that implements all abstract methods to do nothing.
 
     Useful for mocking in tests.
+
     """
 
     def run(self):
@@ -165,6 +172,7 @@ class EmptyWork(LightningWork):
     """A LightningWork that implements all abstract methods to do nothing.
 
     Useful for mocking in tests.
+
     """
 
     def run(self):
