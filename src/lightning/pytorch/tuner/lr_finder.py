@@ -132,7 +132,9 @@ class _LRFinder:
         trainer.strategy.lr_scheduler_configs = [LRSchedulerConfig(scheduler, interval="step")]
         _validate_optimizers_attached(trainer.optimizers, trainer.lr_scheduler_configs)
 
-    def plot(self, suggest: bool = False, show: bool = False, ax: Optional["Axes"] = None) -> Optional["plt.Figure"]:
+    def plot(
+        self, suggest: bool = False, show: bool = False, ax: Optional["Axes"] = None
+    ) -> Optional[Union["plt.Figure", "plt.SubFigure"]]:
         """Plot results from lr_find run
         Args:
             suggest: if True, will mark suggested lr to use with a red point
@@ -151,10 +153,11 @@ class _LRFinder:
         lrs = self.results["lr"]
         losses = self.results["loss"]
 
+        fig: Optional[Union[plt.Figure, plt.SubFigure]]
         if ax is None:
             fig, ax = plt.subplots()
         else:
-            fig = ax.figure  # type: ignore[assignment]
+            fig = ax.figure
 
         # Plot loss as a function of the learning rate
         ax.plot(lrs, losses)
@@ -190,7 +193,7 @@ class _LRFinder:
         losses = losses[torch.isfinite(losses)]
 
         if len(losses) < 2:
-            # computing np.gradient requires at least 2 points
+            # computing torch.gradient requires at least 2 points
             log.error(
                 "Failed to compute suggestion for learning rate because there are not enough points. Increase the loop"
                 " iteration limits or the size of your dataset/dataloader."
@@ -301,6 +304,7 @@ def _lr_find(
     trainer._checkpoint_connector.restore(ckpt_path)
     trainer.strategy.remove_checkpoint(ckpt_path)
     trainer.fit_loop.restarting = False  # reset restarting flag as checkpoint restoring sets it to True
+    trainer.fit_loop.epoch_loop.restarting = False  # reset restarting flag as checkpoint restoring sets it to True
     trainer.fit_loop.epoch_loop.val_loop._combined_loader = None
 
     return lr_finder
@@ -459,7 +463,7 @@ class _LinearLR(LRScheduler):
         super().__init__(optimizer, last_epoch)
 
     @override
-    def get_lr(self) -> List[float]:  # type: ignore[override]
+    def get_lr(self) -> List[float]:
         curr_iter = self.last_epoch + 1
         r = curr_iter / self.num_iter
 
@@ -496,7 +500,7 @@ class _ExponentialLR(LRScheduler):
         super().__init__(optimizer, last_epoch)
 
     @override
-    def get_lr(self) -> List[float]:  # type: ignore[override]
+    def get_lr(self) -> List[float]:
         curr_iter = self.last_epoch + 1
         r = curr_iter / self.num_iter
 

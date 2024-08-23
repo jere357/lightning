@@ -11,13 +11,16 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
+import inspect
 import json
 from argparse import Namespace
 from dataclasses import asdict, is_dataclass
 from typing import Any, Dict, Mapping, MutableMapping, Optional, Union
 
-import numpy as np
 from torch import Tensor
+
+from lightning.fabric.utilities.imports import _NUMPY_AVAILABLE
 
 
 def _convert_params(params: Optional[Union[Dict[str, Any], Namespace]]) -> Dict[str, Any]:
@@ -52,8 +55,11 @@ def _sanitize_callable_params(params: Dict[str, Any]) -> Dict[str, Any]:
     """
 
     def _sanitize_callable(val: Any) -> Any:
-        # Give them one chance to return a value. Don't go rabbit hole of recursive call
+        if inspect.isclass(val):
+            # If it's a class, don't try to instantiate it, just return the name
+            return val.__name__
         if callable(val):
+            # Callables get a chance to return a name
             try:
                 _val = val()
                 if callable(_val):
@@ -89,7 +95,7 @@ def _flatten_dict(params: MutableMapping[Any, Any], delimiter: str = "/", parent
     result: Dict[str, Any] = {}
     for k, v in params.items():
         new_key = parent_key + delimiter + str(k) if parent_key else str(k)
-        if is_dataclass(v):
+        if is_dataclass(v) and not isinstance(v, type):
             v = asdict(v)
         elif isinstance(v, Namespace):
             v = vars(v)
@@ -124,10 +130,12 @@ def _sanitize_params(params: Dict[str, Any]) -> Dict[str, Any]:
 
     """
     for k in params:
-        # convert relevant np scalars to python types first (instead of str)
-        if isinstance(params[k], (np.bool_, np.integer, np.floating)):
-            params[k] = params[k].item()
-        elif type(params[k]) not in [bool, int, float, str, Tensor]:
+        if _NUMPY_AVAILABLE:
+            import numpy as np
+
+            if isinstance(params[k], (np.bool_, np.integer, np.floating)):
+                params[k] = params[k].item()
+        if type(params[k]) not in [bool, int, float, str, Tensor]:
             params[k] = str(params[k])
     return params
 
